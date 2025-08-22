@@ -120,14 +120,7 @@ async function refreshInstagramToken(userId) {
   }
 }
 
-// Minimal home + dashboard
-app.get('/', (_req, res) => {
-  res.send('<h1>Work Automation</h1><a href="/dashboard">Go to Dashboard</a>');
-});
 
-app.get('/dashboard', (_req, res) => {
-  res.send('<h2>Dashboard</h2><ul><li><a href="/instagram-dashboard">Instagram</a></li></ul>');
-});
 
 // Instagram OAuth endpoints (note: real IG OAuth requires client-side flow; placeholder here)
 app.get('/auth/instagram', (_req, res) => {
