@@ -19,7 +19,7 @@ const AdminDashboard = () => {
     role: 'user'
   });
 
-  const API_URL = 'http://localhost:5000';
+  const API_URL = typeof window !== 'undefined' ? window.location.origin : '';
   const token = localStorage.getItem('authToken');
 
   useEffect(() => {

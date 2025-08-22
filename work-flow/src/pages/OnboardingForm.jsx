@@ -146,7 +146,7 @@ const OnboardingForm = () => {
       const user = JSON.parse(userString);
       
       // Send onboarding data to backend
-      const response = await fetch('http://localhost:5000/api/onboarding', {
+      const response = await fetch(`${window.location.origin}/api/onboarding`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

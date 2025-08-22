@@ -28,7 +28,7 @@ const SignOutModal = ({ isOpen, onConfirm, onCancel, title, message }) => {
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          await fetch('http://localhost:5000/api/auth/logout', {
+          await fetch(`${window.location.origin}/api/auth/logout`, {
             method: 'POST',
             headers: {
               'Authorization': `Bearer ${token}`,
