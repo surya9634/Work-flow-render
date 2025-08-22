@@ -4,7 +4,9 @@
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
+    "build": "npm --prefix ../work-flow ci && npm --prefix ../work-flow run build",
     "start": "node server.js",
+    "render-start": "npm run build && node server.js",
     "dev": "nodemon server.js"
   },
   "dependencies": {

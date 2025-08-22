@@ -318,6 +318,15 @@ app.post('/api/whatsapp/send-message', (req, res) => {
   res.json({ success: true, to: phoneNumber, message });
 });
 
+// Serve frontend build (Vite) from work-flow/dist
+const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
+app.use(express.static(clientDir));
+
+// SPA fallback: send index.html for non-API routes
+app.get(/^(?!\/api\/).*/, (_req, res) => {
+  res.sendFile(path.join(clientDir, 'index.html'));
+});
+
 server.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
