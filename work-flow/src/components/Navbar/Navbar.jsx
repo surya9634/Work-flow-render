@@ -1,7 +1,7 @@
 import React from "react";
 import { Menu } from "lucide-react";
 import UserDropdown from "./UserDropdown";
-import NotificationDropdown from "./NotificationDropDown";
+import NotificationDropdown from "./NotificationDropdown";
 
 const Navbar = ({ onToggleSidebar }) => {
   return (
