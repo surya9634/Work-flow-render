@@ -31,6 +31,7 @@ const MessengerChat = () => {
   const [newMessage, setNewMessage] = useState('');
   const [assignments, setAssignments] = useState({});
   const [aiMode, setAiMode] = useState({});
+  const [systemPrompts, setSystemPrompts] = useState({}); // convId -> system prompt text
   const [isSimulating, setIsSimulating] = useState({});
   const clientSimulationTimeouts = useRef({});
   const aiReplyTimeouts = useRef({});
@@ -162,11 +163,12 @@ const MessengerChat = () => {
             const isCustomer = String(normalized.sender).toLowerCase() === 'customer';
             if (isCustomer && aiMode[convId]) {
               const lastUserMessage = normalized.text || normalized.message || '';
+              const systemPrompt = systemPrompts[convId] || '';
               if (lastUserMessage.trim()) {
                 fetch(`${API_BASE}/api/messenger/ai-reply`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ conversationId: convId, lastUserMessage })
+                  body: JSON.stringify({ conversationId: convId, lastUserMessage, systemPrompt })
                 }).catch(() => {});
               }
             }
@@ -231,10 +233,11 @@ const MessengerChat = () => {
       if (aiMode[selectedContact.id]) {
         // Ask backend AI to reply using Gemini
         try {
+          const systemPrompt = systemPrompts[selectedContact.id] || '';
           await fetch(`${API_BASE}/api/messenger/ai-reply`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId: selectedContact.id, lastUserMessage: messageText })
+            body: JSON.stringify({ conversationId: selectedContact.id, lastUserMessage: messageText, systemPrompt })
           });
         } catch (_) {}
       }
@@ -619,6 +622,23 @@ const MessengerChat = () => {
           
           {/* Profile Section - Takes remaining space */}
           <div className="flex-1 overflow-y-auto">
+            {/* System Prompt Editor */}
+            <div className="p-3 border-b border-gray-200">
+              <h3 className="text-sm font-medium text-gray-700 mb-2">System Prompt</h3>
+              <textarea
+                className="w-full h-28 p-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="e.g., You are a sales assistant for ACME. Be concise, helpful, and friendly."
+                value={systemPrompts[selectedContact?.id] || ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  const id = selectedContact?.id;
+                  if (!id) return;
+                  setSystemPrompts(prev => ({ ...prev, [id]: v }));
+                }}
+              />
+              <p className="text-xs text-gray-500 mt-1">Used when AI Mode is ON to guide replies for this conversation.</p>
+            </div>
+
             <ProfileSidebar contact={selectedContact} />
           </div>
         </div>

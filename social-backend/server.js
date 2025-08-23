@@ -673,10 +673,11 @@ app.post('/api/messenger/conversations', (req, res) => {
 
 app.post('/api/messenger/ai-reply', async (req, res) => {
   try {
-    const { conversationId, lastUserMessage } = req.body || {};
+    const { conversationId, lastUserMessage, systemPrompt } = req.body || {};
     if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
     if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
-    const prompt = `You are a helpful business chat assistant. Reply concisely and politely. User said: "${lastUserMessage || ''}"`;
+    const baseSystem = String(systemPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+    const prompt = `${baseSystem}\n\nUser said: "${lastUserMessage || ''}"`;
     const reply = await generateWithGemini(prompt);
     const msg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
     io.emit('messenger:message_created', { conversationId, message: msg });
