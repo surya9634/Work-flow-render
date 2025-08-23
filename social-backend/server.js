@@ -27,6 +27,9 @@ const config = {
     appId: process.env.FACEBOOK_APP_ID || '',
     appSecret: process.env.FACEBOOK_APP_SECRET || '',
     callbackUrl: process.env.FACEBOOK_CALLBACK || 'http://localhost:10000/auth/facebook/callback',
+    pageId: process.env.FB_PAGE_ID || '',
+    pageToken: process.env.FB_PAGE_TOKEN || '',
+    provider: process.env.MESSENGER_PROVIDER || 'local', // 'local' | 'facebook'
   },
   whatsapp: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
@@ -200,6 +203,8 @@ passport.deserializeUser((obj, done) => done(null, obj));
 const users = new Map(); // key: instagram user id
 const configurations = new Map(); // key: userId -> { postId, keyword, response }
 const tokenExpirations = new Map(); // key: userId -> timestamp
+// Map conversation thread id -> participant PSID for Facebook provider
+const fbConvParticipants = new Map();
 let frontendSocket = null;
 
 io.on('connection', (socket) => {
@@ -512,18 +517,73 @@ function seedMessengerDataIfEmpty() {
 
 ensureDir(dataDir);
 loadMessengerStore();
-seedMessengerDataIfEmpty();
+if (config.facebook.provider !== 'facebook') {
+  seedMessengerDataIfEmpty();
+}
 
-app.get('/api/messenger/conversations', (_req, res) => {
-  const list = Array.from(messengerStore.conversations.values());
-  res.json(list);
+// Facebook Messenger proxy helpers
+async function fbApiGet(pathSeg, params = {}) {
+  const url = `https://graph.facebook.com/v21.0/${pathSeg}`;
+  const response = await axios.get(url, { params: { access_token: config.facebook.pageToken, ...params } });
+  return response.data;
+}
+async function fbApiPost(pathSeg, payload = {}) {
+  const url = `https://graph.facebook.com/v21.0/${pathSeg}`;
+  const response = await axios.post(url, payload, { params: { access_token: config.facebook.pageToken } });
+  return response.data;
+}
+
+app.get('/api/messenger/conversations', async (_req, res) => {
+  try {
+    if (config.facebook.provider === 'facebook' && config.facebook.pageId && config.facebook.pageToken) {
+      const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,updated_time,participants.limit(10){id,name,profile_pic}', limit: 200 });
+      const convs = (data.data || []).map(c => {
+        const participants = (c.participants && c.participants.data) || [];
+        const other = participants.find(p => String(p.id) !== String(config.facebook.pageId)) || participants[0] || {};
+        // Cache PSID for send API
+        if (c.id && other.id) fbConvParticipants.set(c.id, other.id);
+        // Use conversation thread id in UI; messages edge works with thread id
+        return {
+          id: c.id,
+          name: other.name || 'Conversation',
+          username: (other.name || 'conversation').toLowerCase().replace(/\s+/g, '.'),
+          profilePic: other.profile_pic || `https://unavatar.io/${encodeURIComponent(other.name || 'user')}`,
+          lastMessage: '',
+          timestamp: c.updated_time || new Date().toISOString(),
+          unreadCount: 0,
+        };
+      });
+      return res.json(convs);
+    }
+    const list = Array.from(messengerStore.conversations.values());
+    return res.json(list);
+  } catch (err) {
+    console.error('FB conversations error:', serializeError(err));
+    return res.status(500).json({ error: 'Error fetching conversations' });
+  }
 });
 
-app.get('/api/messenger/messages', (req, res) => {
+app.get('/api/messenger/messages', async (req, res) => {
   const { conversationId } = req.query;
   if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
-  const msgs = messengerStore.messages.get(conversationId) || [];
-  res.json(msgs);
+  try {
+    if (config.facebook.provider === 'facebook' && config.facebook.pageToken) {
+      const data = await fbApiGet(`${conversationId}/messages`, { fields: 'message,from,created_time', limit: 50 });
+      const items = (data.data || []).reverse().map((m, idx) => ({
+        id: m.id || `fb_${idx}`,
+        sender: m.from && (String(m.from.id) === String(config.facebook.pageId) || String(m.from.id) === String(config.facebook.appId)) ? 'agent' : 'customer',
+        text: m.message || '',
+        timestamp: m.created_time || new Date().toISOString(),
+        isRead: true,
+      }));
+      return res.json(items);
+    }
+    const msgs = messengerStore.messages.get(conversationId) || [];
+    return res.json(msgs);
+  } catch (err) {
+    console.error('FB messages error:', serializeError(err));
+    return res.status(500).json({ error: 'Error fetching messages' });
+  }
 });
 
 // Create conversation
@@ -547,22 +607,50 @@ app.post('/api/messenger/conversations', (req, res) => {
   return res.json({ success: true, conversation: conv });
 });
 
-app.post('/api/messenger/send-message', (req, res) => {
+app.post('/api/messenger/send-message', async (req, res) => {
   const { conversationId, text, sender } = req.body || {};
   if (!conversationId || !text) return res.status(400).json({ error: 'Missing required fields' });
-  const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
-  const arr = messengerStore.messages.get(conversationId) || [];
-  arr.push(msg);
-  messengerStore.messages.set(conversationId, arr);
-  const conv = messengerStore.conversations.get(conversationId);
-  if (conv) {
-    conv.lastMessage = text;
-    conv.timestamp = new Date().toISOString();
-    messengerStore.conversations.set(conversationId, conv);
+  try {
+    if (config.facebook.provider === 'facebook' && config.facebook.pageToken) {
+      // For Facebook, we need the participant PSID for this thread
+      let recipientId = fbConvParticipants.get(conversationId);
+      if (!recipientId) {
+        try {
+          const conv = await fbApiGet(`${conversationId}`, { fields: 'participants.limit(10){id}' });
+          const parts = (conv.participants && conv.participants.data) || [];
+          const other = parts.find(p => String(p.id) !== String(config.facebook.pageId)) || parts[0];
+          if (other && other.id) {
+            recipientId = other.id;
+            fbConvParticipants.set(conversationId, recipientId);
+          }
+        } catch (e) {
+          console.error('FB resolve PSID error:', serializeError(e));
+        }
+      }
+      if (!recipientId) return res.status(400).json({ error: 'Could not resolve participant PSID for conversation' });
+      const url = `https://graph.facebook.com/v21.0/me/messages`;
+      await axios.post(url, { recipient: { id: recipientId }, message: { text } }, { params: { access_token: config.facebook.pageToken } });
+      const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
+      io.emit('messenger:message_created', { conversationId, message: msg });
+      return res.json({ success: true, message: msg });
+    }
+    const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
+    const arr = messengerStore.messages.get(conversationId) || [];
+    arr.push(msg);
+    messengerStore.messages.set(conversationId, arr);
+    const conv = messengerStore.conversations.get(conversationId);
+    if (conv) {
+      conv.lastMessage = text;
+      conv.timestamp = new Date().toISOString();
+      messengerStore.conversations.set(conversationId, conv);
+    }
+    saveMessengerStore();
+    io.emit('messenger:message_created', { conversationId, message: msg });
+    return res.json({ success: true, message: msg });
+  } catch (err) {
+    console.error('FB send error:', serializeError(err));
+    return res.status(500).json({ error: 'Error sending message' });
   }
-  saveMessengerStore();
-  io.emit('messenger:message_created', { conversationId, message: msg });
-  res.json({ success: true, message: msg });
 });
 
 app.post('/api/whatsapp/send-message', (req, res) => {
