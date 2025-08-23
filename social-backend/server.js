@@ -8,6 +8,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const PORT = process.env.PORT || 10000;
 
@@ -437,38 +438,62 @@ app.get('/api/integrations/status', (req, res) => {
   });
 });
 
-// Simple in-memory Messenger data store
+// Messenger data store with JSON persistence
+const dataDir = path.join(__dirname, 'data');
+const messengerFile = path.join(dataDir, 'messenger.json');
+
+function ensureDir(p) {
+  try { fs.mkdirSync(p, { recursive: true }); } catch (_) {}
+}
+
+function readJsonSafe(file, fallback) {
+  try {
+    if (!fs.existsSync(file)) return fallback;
+    const raw = fs.readFileSync(file, 'utf-8');
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to read JSON', file, e.message);
+    return fallback;
+  }
+}
+
+function writeJsonSafe(file, data) {
+  try {
+    ensureDir(path.dirname(file));
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.error('Failed to write JSON', file, e.message);
+  }
+}
+
 const messengerStore = {
   conversations: new Map(), // convId -> { id, name, profilePic, lastMessage, timestamp, unreadCount }
   messages: new Map(), // convId -> [ { id, sender, text, timestamp } ]
 };
 
-function seedMessengerData() {
+function loadMessengerStore() {
+  const json = readJsonSafe(messengerFile, { conversations: [], messages: {} });
+  messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
+  messengerStore.messages = new Map(Object.entries(json.messages));
+}
+
+function saveMessengerStore() {
+  const conversations = Array.from(messengerStore.conversations.values());
+  const messages = Object.fromEntries(Array.from(messengerStore.messages.entries()));
+  writeJsonSafe(messengerFile, { conversations, messages });
+}
+
+function seedMessengerDataIfEmpty() {
   if (messengerStore.conversations.size > 0) return;
   const now = () => new Date().toISOString();
-  const convs = [
-    { id: 'conv_1', name: 'Aarav Sharma', username: 'aarav.sharma', profilePic: 'https://unavatar.io/aarav.sharma', lastMessage: 'Can you share pricing?', timestamp: now(), unreadCount: 2 },
-    { id: 'conv_2', name: 'Priya Patel', username: 'priya.patel', profilePic: 'https://unavatar.io/priya.patel', lastMessage: 'Thanks for the info!', timestamp: now(), unreadCount: 0 },
-    { id: 'conv_3', name: 'Rohan Gupta', username: 'rohan.g', profilePic: 'https://unavatar.io/rohan.g', lastMessage: 'Let’s schedule a demo.', timestamp: now(), unreadCount: 1 },
-  ];
+  const convs = [];
   convs.forEach(c => messengerStore.conversations.set(c.id, c));
-  messengerStore.messages.set('conv_1', [
-    { id: 'm1', sender: 'customer', text: 'Hi! I am interested in your product.', timestamp: now() },
-    { id: 'm2', sender: 'agent', text: 'Great! What are you looking to automate?', timestamp: now() },
-    { id: 'm3', sender: 'customer', text: 'Can you share pricing?', timestamp: now() },
-  ]);
-  messengerStore.messages.set('conv_2', [
-    { id: 'm4', sender: 'customer', text: 'Appreciate the quick response.', timestamp: now() },
-    { id: 'm5', sender: 'agent', text: 'Happy to help!', timestamp: now() },
-    { id: 'm6', sender: 'customer', text: 'Thanks for the info!', timestamp: now() },
-  ]);
-  messengerStore.messages.set('conv_3', [
-    { id: 'm7', sender: 'customer', text: 'Can we do a demo this week?', timestamp: now() },
-    { id: 'm8', sender: 'agent', text: 'Yes! How about Wednesday 3 PM?', timestamp: now() },
-    { id: 'm9', sender: 'customer', text: 'Let’s schedule a demo.', timestamp: now() },
-  ]);
+  saveMessengerStore();
 }
-seedMessengerData();
+
+ensureDir(dataDir);
+loadMessengerStore();
+seedMessengerDataIfEmpty();
 
 app.get('/api/messenger/conversations', (_req, res) => {
   const list = Array.from(messengerStore.conversations.values());
@@ -482,10 +507,31 @@ app.get('/api/messenger/messages', (req, res) => {
   res.json(msgs);
 });
 
+// Create conversation
+app.post('/api/messenger/conversations', (req, res) => {
+  const { name, username, profilePic } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const id = 'conv_' + Date.now();
+  const conv = {
+    id,
+    name,
+    username: username || name.toLowerCase().replace(/\s+/g, '.'),
+    profilePic: profilePic || `https://unavatar.io/${encodeURIComponent(name)}`,
+    lastMessage: '',
+    timestamp: new Date().toISOString(),
+    unreadCount: 0,
+  };
+  messengerStore.conversations.set(id, conv);
+  messengerStore.messages.set(id, []);
+  saveMessengerStore();
+  io.emit('messenger:conversation_created', conv);
+  return res.json({ success: true, conversation: conv });
+});
+
 app.post('/api/messenger/send-message', (req, res) => {
-  const { conversationId, text } = req.body || {};
+  const { conversationId, text, sender } = req.body || {};
   if (!conversationId || !text) return res.status(400).json({ error: 'Missing required fields' });
-  const msg = { id: 'm_' + Date.now(), sender: 'agent', text, timestamp: new Date().toISOString() };
+  const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
   const arr = messengerStore.messages.get(conversationId) || [];
   arr.push(msg);
   messengerStore.messages.set(conversationId, arr);
@@ -495,6 +541,8 @@ app.post('/api/messenger/send-message', (req, res) => {
     conv.timestamp = new Date().toISOString();
     messengerStore.conversations.set(conversationId, conv);
   }
+  saveMessengerStore();
+  io.emit('messenger:message_created', { conversationId, message: msg });
   res.json({ success: true, message: msg });
 });
 
