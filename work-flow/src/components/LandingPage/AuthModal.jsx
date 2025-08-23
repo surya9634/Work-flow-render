@@ -12,8 +12,8 @@ const getApiUrl = () => {
   if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
-  // Default fallback
-  return 'http://localhost:5000';
+  // Default fallback to same origin
+  return typeof window !== 'undefined' ? window.location.origin : '';
 };
 
 const API_URL = getApiUrl();
