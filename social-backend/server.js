@@ -740,6 +740,30 @@ app.post('/api/messenger/send-message', async (req, res) => {
     }
     saveMessengerStore();
     io.emit('messenger:message_created', { conversationId, message: msg });
+
+    // Auto-reply for local provider when customer sends a message
+    if ((sender === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook) {
+      try {
+        const stored = messengerStore.systemPrompts.get(conversationId) || '';
+        const baseSystem = String(stored || 'You are a helpful business chat assistant. Reply concisely and politely.').trim();
+        const replyText = await generateWithGemini(String(text || ''), baseSystem);
+        if (replyText) {
+          const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: replyText, timestamp: new Date().toISOString(), isRead: true };
+          arr.push(aiMsg);
+          messengerStore.messages.set(conversationId, arr);
+          if (conv) {
+            conv.lastMessage = replyText;
+            conv.timestamp = new Date().toISOString();
+            messengerStore.conversations.set(conversationId, conv);
+          }
+          saveMessengerStore();
+          io.emit('messenger:message_created', { conversationId, message: aiMsg });
+        }
+      } catch (autoErr) {
+        console.warn('Local auto-reply failed:', serializeError(autoErr));
+      }
+    }
+
     return res.json({ success: true, message: msg });
   } catch (err) {
     console.error('FB send error:', serializeError(err));
