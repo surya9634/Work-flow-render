@@ -34,7 +34,7 @@ const ProfileSidebar = ({ contact }) => {
         
         <div className="flex items-center justify-center text-sm text-gray-600 mb-4">
           <MapPin className="w-4 h-4 mr-1" />
-          <span>{contact.location}</span>
+          <span>{contact.location || '—'}</span>
         </div>
 
         <button className="w-full bg-green-500 hover:bg-green-600 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2">
@@ -48,7 +48,7 @@ const ProfileSidebar = ({ contact }) => {
         <div>
           <h4 className="text-sm font-semibold text-gray-900 mb-2">About</h4>
           <p className="text-sm text-gray-600 leading-relaxed">
-            {contact.bio}
+            {contact.bio || 'No bio available.'}
           </p>
         </div>
 
@@ -56,7 +56,7 @@ const ProfileSidebar = ({ contact }) => {
           <h4 className="text-sm font-semibold text-gray-900 mb-2">Sales Intent</h4>
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
             <p className="text-sm text-blue-800">
-              {contact.intent}
+              {contact.intent || '—'}
             </p>
           </div>
         </div>
@@ -66,15 +66,15 @@ const ProfileSidebar = ({ contact }) => {
           <div className="space-y-2 text-sm">
             <div>
               <span className="text-gray-500">Email:</span>
-              <span className="ml-2 text-gray-700">{contact.email}</span>
+              <span className="ml-2 text-gray-700">{contact.email || '—'}</span>
             </div>
             <div>
               <span className="text-gray-500">Phone:</span>
-              <span className="ml-2 text-gray-700">{contact.phone}</span>
+              <span className="ml-2 text-gray-700">{contact.phone || '—'}</span>
             </div>
             <div>
               <span className="text-gray-500">Company:</span>
-              <span className="ml-2 text-gray-700">{contact.company}</span>
+              <span className="ml-2 text-gray-700">{contact.company || '—'}</span>
             </div>
           </div>
         </div>
@@ -83,16 +83,19 @@ const ProfileSidebar = ({ contact }) => {
           <h4 className="text-sm font-semibold text-gray-900 mb-2">Lead Score</h4>
           <div className="flex items-center">
             <div className="flex-1 bg-gray-200 rounded-full h-2">
-              <div 
-                className={`h-2 rounded-full ${
-                  contact.leadScore >= 80 ? 'bg-green-500' :
-                  contact.leadScore >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                }`}
-                style={{ width: `${contact.leadScore}%` }}
-              ></div>
+              {(() => {
+                const score = Number(contact.leadScore || 0);
+                const color = score >= 80 ? 'bg-green-500' : score >= 60 ? 'bg-yellow-500' : 'bg-red-500';
+                return (
+                  <div
+                    className={`h-2 rounded-full ${color}`}
+                    style={{ width: `${score}%` }}
+                  ></div>
+                );
+              })()}
             </div>
             <span className="ml-2 text-sm font-medium text-gray-700">
-              {contact.leadScore}/100
+              {Number(contact.leadScore || 0)}/100
             </span>
           </div>
         </div>
@@ -114,7 +117,7 @@ const ProfileSidebar = ({ contact }) => {
         <div>
           <h4 className="text-sm font-semibold text-gray-900 mb-2">Tags</h4>
           <div className="flex flex-wrap gap-1">
-            {contact.tags.map((tag, index) => (
+            {(contact.tags || []).map((tag, index) => (
               <span
                 key={index}
                 className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full"
