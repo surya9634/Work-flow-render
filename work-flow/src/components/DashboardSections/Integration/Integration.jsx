@@ -15,7 +15,31 @@ const Integration  = () => {
   const [editingConnection, setEditingConnection] = useState(null);
   const [editingAutomation, setEditingAutomation] = useState(null);
 
+  const API_BASE = typeof window !== 'undefined' ? window.location.origin : '';
+
+  // Load integration status (facebook/whatsapp/instagram)
+  const [status, setStatus] = useState({ facebook: { connected: false }, whatsapp: { connected: false }, instagram: { connected: false } });
+  useEffect(() => {
+    let ignore = false;
+    async function loadStatus() {
+      try {
+        const res = await fetch(`${API_BASE}/api/integrations/status`);
+        const data = await res.json();
+        if (!res.ok) throw new Error('Failed to load integration status');
+        if (ignore) return;
+        setStatus(data);
+      } catch {}
+    }
+    loadStatus();
+    return () => { ignore = true; };
+  }, []);
+
   const handleAddConnection = (platform) => {
+    if (platform === 'facebook') {
+      // Kick off backend OAuth
+      window.location.href = `${API_BASE}/auth/facebook`;
+      return;
+    }
     setSelectedPlatform(platform);
     setEditingConnection(null);
     setShowConnectionModal(true);

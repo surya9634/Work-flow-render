@@ -6,12 +6,15 @@ import ProfileSidebar from './ProfileSidebar';
 import AssignToDropdown from './AssignToDropdown';
 import ChatSummary from './ChatSummary';
 import QuickReplies from './QuickReplies';
-import { contacts as initialContacts, messages as initialMessages } from './dummyData';
+// Real data endpoints
+const API_BASE = typeof window !== 'undefined' ? window.location.origin : '';
 
 const MessengerChat = () => {
-  const [contacts, setContacts] = useState(initialContacts);
-  const [messages, setMessages] = useState(initialMessages);
-  const [selectedContact, setSelectedContact] = useState(initialContacts[0]);
+  const [contacts, setContacts] = useState([]);
+  const [messages, setMessages] = useState({}); // { convId: [{id,sender,text,timestamp}] }
+  const [selectedContact, setSelectedContact] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [newMessage, setNewMessage] = useState('');
   const [assignments, setAssignments] = useState({});
@@ -52,18 +55,65 @@ const MessengerChat = () => {
     "Setup is usually completed within 24-48 hours, and we'll guide you through every step of the process."
   ];
 
+  // Load conversations once
+  useEffect(() => {
+    let ignore = false;
+    async function loadConversations() {
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_BASE}/api/messenger/conversations`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Failed to load conversations');
+        if (ignore) return;
+        const normalized = data.map(c => ({
+          id: c.id,
+          name: c.name,
+          avatar: c.profilePic || `https://unavatar.io/${encodeURIComponent(c.name)}`,
+          lastMessage: c.lastMessage || '',
+          timestamp: 'now',
+          isOnline: true,
+          lastUpdated: c.timestamp || new Date().toISOString(),
+        }));
+        setContacts(normalized);
+        if (normalized[0]) setSelectedContact(normalized[0]);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadConversations();
+    return () => { ignore = true; };
+  }, []);
+
+  // Load messages when a contact is selected
+  useEffect(() => {
+    let ignore = false;
+    async function loadMessages(convId) {
+      try {
+        if (!convId) return;
+        const res = await fetch(`${API_BASE}/api/messenger/messages?conversationId=${encodeURIComponent(convId)}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error || 'Failed to load messages');
+        if (ignore) return;
+        setMessages(prev => ({ ...prev, [convId]: data }));
+      } catch (e) {
+        setError(e.message);
+      }
+    }
+    if (selectedContact?.id && !messages[selectedContact.id]) {
+      loadMessages(selectedContact.id);
+    }
+    return () => { ignore = true; };
+  }, [selectedContact?.id]);
+
   // Filter contacts based on search term and sort by most recent activity
   const filteredContacts = contacts
     .filter(contact =>
       contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.lastMessage.toLowerCase().includes(searchTerm.toLowerCase())
+      (contact.lastMessage || '').toLowerCase().includes(searchTerm.toLowerCase())
     )
-    .sort((a, b) => {
-      // Sort by timestamp - most recent first
-      const aTime = new Date(a.lastUpdated || '2024-01-01');
-      const bTime = new Date(b.lastUpdated || '2024-01-01');
-      return bTime - aTime;
-    });
+    .sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0));
 
   const handleContactSelect = (contact) => {
     setSelectedContact(contact);
@@ -76,35 +126,27 @@ const MessengerChat = () => {
     }
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (newMessage.trim() && selectedContact) {
-      const userMsg = {
-        id: Date.now(),
-        sender: 'customer',
-        message: newMessage,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isRead: false
-      };
-
-      // Add user message to chat
-      setMessages(prev => ({
-        ...prev,
-        [selectedContact.id]: [...(prev[selectedContact.id] || []), userMsg]
-      }));
-
-      // Update contact's last message and timestamp
-      updateContactPreview(selectedContact.id, newMessage);
-      
-      const messageText = newMessage;
-      setNewMessage('');
-
-      // If AI Mode is enabled, trigger auto-reply after 1.5 seconds
+    if (!newMessage.trim() || !selectedContact) return;
+    const messageText = newMessage;
+    setNewMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/messenger/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: selectedContact.id, text: messageText })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Failed to send message');
+      const userMsg = { id: data.message.id, sender: 'agent', message: messageText, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isRead: true };
+      setMessages(prev => ({ ...prev, [selectedContact.id]: [...(prev[selectedContact.id] || []), userMsg] }));
+      updateContactPreview(selectedContact.id, messageText);
       if (aiMode[selectedContact.id]) {
-        aiReplyTimeouts.current[selectedContact.id] = setTimeout(() => {
-          sendAiReply(selectedContact.id);
-        }, 1500);
+        aiReplyTimeouts.current[selectedContact.id] = setTimeout(() => { sendAiReply(selectedContact.id); }, 1500);
       }
+    } catch (err) {
+      setError(err.message);
     }
   };
 

@@ -13,6 +13,7 @@ const ContactItem = ({ contact, isSelected, onClick }) => {
         <img
           src={contact.avatar}
           alt={contact.name}
+          onError={(e) => { e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(contact.name)}&background=random`; }}
           className="w-12 h-12 rounded-full object-cover"
         />
         {contact.isOnline && (

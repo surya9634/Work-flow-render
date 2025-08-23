@@ -421,18 +421,81 @@ app.get('/api/user-info', (req, res) => {
 });
 
 // Simple placeholders for Messenger/WhatsApp until keys/pages are configured
-app.get('/api/messenger/conversations', (_req, res) => {
-  res.json([{ id: 'conv1', name: 'John Doe' }, { id: 'conv2', name: 'Jane Smith' }]);
+// Integration status endpoint (session-based)
+app.get('/api/integrations/status', (req, res) => {
+  res.json({
+    facebook: {
+      connected: !!req.session.facebookConnected,
+      accountName: req.user?.displayName || null,
+    },
+    instagram: {
+      connected: false,
+    },
+    whatsapp: {
+      connected: false,
+    }
+  });
 });
 
-app.get('/api/messenger/messages', (_req, res) => {
-  res.json([{ id: 'msg1', sender_name: 'John Doe', text: 'Hello!' }, { id: 'msg2', sender_name: 'You', text: 'Hi there!' }]);
+// Simple in-memory Messenger data store
+const messengerStore = {
+  conversations: new Map(), // convId -> { id, name, profilePic, lastMessage, timestamp, unreadCount }
+  messages: new Map(), // convId -> [ { id, sender, text, timestamp } ]
+};
+
+function seedMessengerData() {
+  if (messengerStore.conversations.size > 0) return;
+  const now = () => new Date().toISOString();
+  const convs = [
+    { id: 'conv_1', name: 'Aarav Sharma', username: 'aarav.sharma', profilePic: 'https://unavatar.io/aarav.sharma', lastMessage: 'Can you share pricing?', timestamp: now(), unreadCount: 2 },
+    { id: 'conv_2', name: 'Priya Patel', username: 'priya.patel', profilePic: 'https://unavatar.io/priya.patel', lastMessage: 'Thanks for the info!', timestamp: now(), unreadCount: 0 },
+    { id: 'conv_3', name: 'Rohan Gupta', username: 'rohan.g', profilePic: 'https://unavatar.io/rohan.g', lastMessage: 'Let’s schedule a demo.', timestamp: now(), unreadCount: 1 },
+  ];
+  convs.forEach(c => messengerStore.conversations.set(c.id, c));
+  messengerStore.messages.set('conv_1', [
+    { id: 'm1', sender: 'customer', text: 'Hi! I am interested in your product.', timestamp: now() },
+    { id: 'm2', sender: 'agent', text: 'Great! What are you looking to automate?', timestamp: now() },
+    { id: 'm3', sender: 'customer', text: 'Can you share pricing?', timestamp: now() },
+  ]);
+  messengerStore.messages.set('conv_2', [
+    { id: 'm4', sender: 'customer', text: 'Appreciate the quick response.', timestamp: now() },
+    { id: 'm5', sender: 'agent', text: 'Happy to help!', timestamp: now() },
+    { id: 'm6', sender: 'customer', text: 'Thanks for the info!', timestamp: now() },
+  ]);
+  messengerStore.messages.set('conv_3', [
+    { id: 'm7', sender: 'customer', text: 'Can we do a demo this week?', timestamp: now() },
+    { id: 'm8', sender: 'agent', text: 'Yes! How about Wednesday 3 PM?', timestamp: now() },
+    { id: 'm9', sender: 'customer', text: 'Let’s schedule a demo.', timestamp: now() },
+  ]);
+}
+seedMessengerData();
+
+app.get('/api/messenger/conversations', (_req, res) => {
+  const list = Array.from(messengerStore.conversations.values());
+  res.json(list);
+});
+
+app.get('/api/messenger/messages', (req, res) => {
+  const { conversationId } = req.query;
+  if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+  const msgs = messengerStore.messages.get(conversationId) || [];
+  res.json(msgs);
 });
 
 app.post('/api/messenger/send-message', (req, res) => {
-  const { conversationId, message } = req.body || {};
-  if (!conversationId || !message) return res.status(400).json({ error: 'Missing required fields' });
-  res.json({ success: true, to: conversationId, message });
+  const { conversationId, text } = req.body || {};
+  if (!conversationId || !text) return res.status(400).json({ error: 'Missing required fields' });
+  const msg = { id: 'm_' + Date.now(), sender: 'agent', text, timestamp: new Date().toISOString() };
+  const arr = messengerStore.messages.get(conversationId) || [];
+  arr.push(msg);
+  messengerStore.messages.set(conversationId, arr);
+  const conv = messengerStore.conversations.get(conversationId);
+  if (conv) {
+    conv.lastMessage = text;
+    conv.timestamp = new Date().toISOString();
+    messengerStore.conversations.set(conversationId, conv);
+  }
+  res.json({ success: true, message: msg });
 });
 
 app.post('/api/whatsapp/send-message', (req, res) => {
