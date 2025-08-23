@@ -701,6 +701,9 @@ app.post('/api/messenger/send-message', async (req, res) => {
   const { conversationId, text, sender, systemPrompt } = req.body || {};
   if (!conversationId || !text) return res.status(400).json({ error: 'Missing required fields' });
   try {
+    // Normalize sender to 'agent' or 'customer'
+    const senderNorm = (sender === 'customer') ? 'customer' : 'agent';
+
     if (typeof systemPrompt === 'string') {
       messengerStore.systemPrompts.set(conversationId, systemPrompt);
       saveMessengerStore();
@@ -724,11 +727,11 @@ app.post('/api/messenger/send-message', async (req, res) => {
       if (!recipientId) return res.status(400).json({ error: 'Could not resolve participant PSID for conversation' });
       const url = `https://graph.facebook.com/v21.0/me/messages`;
       await axios.post(url, { recipient: { id: recipientId }, message: { text } }, { params: { access_token: config.facebook.pageToken } });
-      const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
+      const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
       io.emit('messenger:message_created', { conversationId, message: msg });
       return res.json({ success: true, message: msg });
     }
-    const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text, timestamp: new Date().toISOString() };
+    const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
     const arr = messengerStore.messages.get(conversationId) || [];
     arr.push(msg);
     messengerStore.messages.set(conversationId, arr);
@@ -742,7 +745,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
     io.emit('messenger:message_created', { conversationId, message: msg });
 
     // Auto-reply for local provider when customer sends a message
-    if ((sender === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook) {
+    if ((senderNorm === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook) {
       try {
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
         const baseSystem = String(stored || 'You are a helpful business chat assistant. Reply concisely and politely.').trim();
@@ -833,6 +836,8 @@ app.post('/webhook', async (req, res) => {
           if (threadId) {
             // Cache mapping and emit realtime event
             fbConvParticipants.set(threadId, senderId);
+            // Skip echoes of our own messages
+            if (message.is_echo) continue;
             const text = message.text || (message.attachments && '[attachment]') || '';
             io.emit('messenger:message_created', {
               conversationId: threadId,
