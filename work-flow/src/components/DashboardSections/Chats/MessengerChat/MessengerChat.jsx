@@ -7,7 +7,7 @@ import AssignToDropdown from './AssignToDropdown';
 import ChatSummary from './ChatSummary';
 import QuickReplies from './QuickReplies';
 // Real data endpoints
-const API_BASE = typeof window !== 'undefined' ? window.location.origin : '';
+const API_BASE = (import.meta?.env?.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
 
 const MessengerChat = () => {
   const [contacts, setContacts] = useState([]);
