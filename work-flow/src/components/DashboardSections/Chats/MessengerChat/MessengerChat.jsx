@@ -111,7 +111,11 @@ const MessengerChat = () => {
         if (!res.ok) throw new Error(data?.error || 'Failed to load messages');
         if (ignore) return;
         const arr = Array.isArray(data) ? data : (data.messages || []);
-        const sysPrompt = Array.isArray(data) ? '' : (data.systemPrompt || '');
+        let sysPrompt = Array.isArray(data) ? '' : (data.systemPrompt || '');
+        // Fallback: read from localStorage if backend didn't provide it
+        if (!sysPrompt) {
+          try { sysPrompt = localStorage.getItem(`wf_sys_prompt_${convId}`) || ''; } catch {}
+        }
         if (sysPrompt) {
           setSystemPrompts(prev => ({ ...prev, [convId]: sysPrompt }));
         }
@@ -646,13 +650,18 @@ const MessengerChat = () => {
                   className="px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                   onClick={async () => {
                     if (!selectedContact?.id) return;
+                    const convId = selectedContact.id;
+                    const prompt = systemPrompts[convId] || '';
                     try {
-                      await fetch(`${API_BASE}/api/messenger/system-prompt`, {
+                      const res = await fetch(`${API_BASE}/api/messenger/system-prompt`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ conversationId: selectedContact.id, systemPrompt: systemPrompts[selectedContact.id] || '' })
+                        body: JSON.stringify({ conversationId: convId, systemPrompt: prompt })
                       });
+                      if (!res.ok) throw new Error('save_failed');
                     } catch {}
+                    // Always persist locally as a fallback
+                    try { localStorage.setItem(`wf_sys_prompt_${convId}`, prompt); } catch {}
                   }}
                 >
                   Enter
