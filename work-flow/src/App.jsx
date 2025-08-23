@@ -9,6 +9,7 @@ import LandingPage from "./pages/WorkFlowLanding";
 import Dashboard from "./pages/WorkFlowDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
 import OnboardingForm from "./pages/OnboardingForm";
+import AIChat from "./pages/AIChat";
 
 // ProtectedRoute component with role-based rendering
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -111,6 +112,8 @@ function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="/ai-chat" element={<AIChat />} />
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />

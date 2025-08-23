@@ -859,6 +859,19 @@ app.use(express.static(clientDir, {
   maxAge: '1h'
 }));
 
+// Simple AI test endpoint for /ai-chat page
+app.post('/api/ai/test', async (req, res) => {
+  try {
+    const prompt = (req.body && req.body.prompt) || 'Say hello!';
+    if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
+    const text = await generateWithGemini(String(prompt));
+    return res.json({ text });
+  } catch (err) {
+    console.error('AI test error:', serializeError(err));
+    return res.status(500).json({ error: 'ai_test_failed' });
+  }
+});
+
 // SPA fallback: send index.html for non-API routes
 app.get(/^(?!\/api\/).*/, (_req, res) => {
   res.sendFile(path.join(clientDir, 'index.html'));

@@ -155,6 +155,22 @@ const MessengerChat = () => {
           // Update contact preview and bump ordering
           const preview = normalized.text || normalized.message || '';
           updateContactPreview(payload.conversationId, preview);
+
+          // Auto-trigger backend AI reply when AI Mode is ON and a customer message arrives
+          try {
+            const convId = payload.conversationId;
+            const isCustomer = String(normalized.sender).toLowerCase() === 'customer';
+            if (isCustomer && aiMode[convId]) {
+              const lastUserMessage = normalized.text || normalized.message || '';
+              if (lastUserMessage.trim()) {
+                fetch(`${API_BASE}/api/messenger/ai-reply`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ conversationId: convId, lastUserMessage })
+                }).catch(() => {});
+              }
+            }
+          } catch (_) {}
         });
         socket.on('messenger:conversation_created', (conv) => {
           if (!conv?.id) return;
