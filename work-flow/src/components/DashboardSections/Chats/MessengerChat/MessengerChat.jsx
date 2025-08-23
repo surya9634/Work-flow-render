@@ -194,7 +194,14 @@ const MessengerChat = () => {
       setMessages(prev => ({ ...prev, [selectedContact.id]: [...(prev[selectedContact.id] || []), userMsg] }));
       updateContactPreview(selectedContact.id, messageText);
       if (aiMode[selectedContact.id]) {
-        aiReplyTimeouts.current[selectedContact.id] = setTimeout(() => { sendAiReply(selectedContact.id); }, 1500);
+        // Ask backend AI to reply using Gemini
+        try {
+          await fetch(`${API_BASE}/api/messenger/ai-reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ conversationId: selectedContact.id, lastUserMessage: messageText })
+          });
+        } catch (_) {}
       }
     } catch (err) {
       setError(err.message);

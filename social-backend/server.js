@@ -561,6 +561,30 @@ async function fbApiPost(pathSeg, payload = {}) {
   return response.data;
 }
 
+// --- Helpers ---
+async function fbGetProfilePic(psid) {
+  try {
+    if (!psid || !config.facebook.pageToken) return null;
+    const data = await fbApiGet(`${psid}`, { fields: 'id,profile_pic' });
+    return data && (data.profile_pic || null);
+  } catch (err) {
+    return null;
+  }
+}
+
+async function generateWithGemini(prompt) {
+  if (!config.ai.geminiKey) throw new Error('gemini_key_missing');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
+  const payload = {
+    contents: [
+      { role: 'user', parts: [{ text: String(prompt || '').slice(0, 4000) }] }
+    ]
+  };
+  const resp = await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
+  const text = resp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  return text.trim();
+}
+
 app.get('/api/messenger/conversations', async (_req, res) => {
   try {
     if (config.facebook.provider === 'facebook') {
@@ -568,22 +592,28 @@ app.get('/api/messenger/conversations', async (_req, res) => {
         return res.status(400).json({ error: 'facebook_not_configured' });
       }
       const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,updated_time,participants.limit(10){id,name,profile_pic}', limit: 200 });
-      const convs = (data.data || []).map(c => {
+      const convs = await Promise.all((data.data || []).map(async (c) => {
         const participants = (c.participants && c.participants.data) || [];
         const other = participants.find(p => String(p.id) !== String(config.facebook.pageId)) || participants[0] || {};
         // Cache PSID for send API
         if (c.id && other.id) fbConvParticipants.set(c.id, other.id);
-        // Use conversation thread id in UI; messages edge works with thread id
+        // Try to get real FB profile picture
+        let profilePic = other.profile_pic || null;
+        if (!profilePic && other.id) {
+          profilePic = await fbGetProfilePic(other.id);
+        }
+        // Fallback avatar
+        if (!profilePic) profilePic = `https://unavatar.io/${encodeURIComponent(other.name || 'user')}`;
         return {
           id: c.id,
           name: other.name || 'Conversation',
           username: (other.name || 'conversation').toLowerCase().replace(/\s+/g, '.'),
-          profilePic: other.profile_pic || `https://unavatar.io/${encodeURIComponent(other.name || 'user')}`,
+          profilePic,
           lastMessage: '',
           timestamp: c.updated_time || new Date().toISOString(),
           unreadCount: 0,
         };
-      });
+      }));
       return res.json(convs);
     }
     const list = Array.from(messengerStore.conversations.values());
@@ -639,6 +669,22 @@ app.post('/api/messenger/conversations', (req, res) => {
   saveMessengerStore();
   io.emit('messenger:conversation_created', conv);
   return res.json({ success: true, conversation: conv });
+});
+
+app.post('/api/messenger/ai-reply', async (req, res) => {
+  try {
+    const { conversationId, lastUserMessage } = req.body || {};
+    if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+    if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
+    const prompt = `You are a helpful business chat assistant. Reply concisely and politely. User said: "${lastUserMessage || ''}"`;
+    const reply = await generateWithGemini(prompt);
+    const msg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
+    io.emit('messenger:message_created', { conversationId, message: msg });
+    return res.json({ success: true, message: msg });
+  } catch (err) {
+    console.error('AI reply error:', serializeError(err));
+    return res.status(500).json({ error: 'ai_reply_failed' });
+  }
 });
 
 app.post('/api/messenger/send-message', async (req, res) => {
@@ -760,6 +806,26 @@ app.post('/webhook', async (req, res) => {
                 isRead: true,
               }
             });
+            // Optional: auto-reply with Gemini when message text exists
+            if (text && config.ai.geminiKey && config.facebook.pageToken) {
+              try {
+                const reply = await generateWithGemini(`You are a helpful business chat assistant. Reply concisely and politely. User said: "${text}"`);
+                if (reply) {
+                  // Send reply via FB API
+                  await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+                    recipient: { id: senderId },
+                    message: { text: reply.slice(0, 900) }
+                  }, { params: { access_token: config.facebook.pageToken } });
+                  // Emit to frontend
+                  io.emit('messenger:message_created', {
+                    conversationId: threadId,
+                    message: { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true }
+                  });
+                }
+              } catch (aiErr) {
+                console.warn('Gemini auto-reply failed:', serializeError(aiErr));
+              }
+            }
           } else {
             console.warn('Webhook: could not resolve thread for PSID', senderId);
           }
