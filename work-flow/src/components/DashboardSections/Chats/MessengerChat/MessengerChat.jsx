@@ -298,32 +298,17 @@ const MessengerChat = () => {
     
     setIsSimulating(prev => ({ ...prev, [contactId]: true }));
     
-    const simulateMessage = () => {
+    const simulateMessage = async () => {
       if (!aiMode[contactId]) return;
-      
       const randomMessage = clientMessages[Math.floor(Math.random() * clientMessages.length)];
-      const newMsg = {
-        id: Date.now(),
-        sender: 'customer',
-        message: randomMessage,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        isRead: false
-      };
-
-      // Add client message
-      setMessages(prev => ({
-        ...prev,
-        [contactId]: [...(prev[contactId] || []), newMsg]
-      }));
-
-      // Update contact preview
-      updateContactPreview(contactId, randomMessage);
-
-      // Trigger AI auto-reply after 1.5 seconds
-      aiReplyTimeouts.current[contactId] = setTimeout(() => {
-        sendAiReply(contactId);
-      }, 1500);
-
+      try {
+        // Post customer message to backend so it persists and triggers server auto-reply
+        await fetch(`${API_BASE}/api/messenger/send-message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: contactId, text: randomMessage, sender: 'customer' })
+        });
+      } catch (_) {}
       // Schedule next client message (3-8 seconds)
       const nextDelay = 3000 + Math.random() * 5000;
       clientSimulationTimeouts.current[contactId] = setTimeout(simulateMessage, nextDelay);
