@@ -52,6 +52,107 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// --- Minimal in-memory auth + onboarding for demo ---
+const authStore = {
+  usersByEmail: new Map(), // email -> user
+  usersById: new Map(),    // id -> user
+  tokens: new Map(),       // token -> userId
+  onboardingByUser: new Map(), // userId -> onboarding data
+};
+
+function createUser(email, password) {
+  const id = 'u_' + Math.random().toString(36).slice(2, 10);
+  const user = {
+    id,
+    email,
+    password, // NOTE: plain for demo only
+    role: 'user',
+    name: '',
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    lastLogin: null,
+    onboardingCompleted: false,
+  };
+  authStore.usersByEmail.set(email, user);
+  authStore.usersById.set(id, user);
+  return user;
+}
+
+function issueToken(userId) {
+  const token = 't_' + Math.random().toString(36).slice(2) + Date.now();
+  authStore.tokens.set(token, userId);
+  return token;
+}
+
+function getTokenFromHeader(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7) : null;
+}
+
+function requireAuth(req, res, next) {
+  const token = getTokenFromHeader(req);
+  const userId = token && authStore.tokens.get(token);
+  if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+  req.userId = userId;
+  next();
+}
+
+app.post('/api/auth/signup', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
+    if (authStore.usersByEmail.has(email)) return res.status(409).json({ success: false, message: 'Email already registered' });
+    const user = createUser(email, password);
+    user.lastLogin = new Date().toISOString();
+    const token = issueToken(user.id);
+    return res.json({ success: true, message: 'Account created successfully', token, user: { id: user.id, email: user.email, role: user.role, onboardingCompleted: user.onboardingCompleted } });
+  } catch (e) {
+    console.error('Signup error:', e);
+    return res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+
+app.post('/api/auth/signin', (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ success: false, message: 'Email and password required' });
+    const user = authStore.usersByEmail.get(email);
+    if (!user || user.password !== password) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    user.lastLogin = new Date().toISOString();
+    const token = issueToken(user.id);
+    return res.json({ success: true, message: 'Signed in successfully', token, user: { id: user.id, email: user.email, role: user.role, onboardingCompleted: user.onboardingCompleted } });
+  } catch (e) {
+    console.error('Signin error:', e);
+    return res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  try {
+    const token = getTokenFromHeader(req);
+    if (token) authStore.tokens.delete(token);
+    return res.json({ success: true, message: 'Logged out' });
+  } catch (e) {
+    return res.json({ success: true });
+  }
+});
+
+app.post('/api/onboarding', requireAuth, (req, res) => {
+  try {
+    const { userId, ...data } = req.body || {};
+    if (!userId) return res.status(400).json({ success: false, message: 'userId required' });
+    const user = authStore.usersById.get(userId);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    authStore.onboardingByUser.set(userId, data);
+    user.onboardingCompleted = true;
+    return res.json({ success: true, message: 'Onboarding saved' });
+  } catch (e) {
+    console.error('Onboarding error:', e);
+    return res.status(500).json({ success: false, message: 'Internal error' });
+  }
+});
+// --- End in-memory demo ---
+
 app.use(session({
   secret: process.env.SESSION_SECRET || 'work_automation_secret',
   resave: false,
