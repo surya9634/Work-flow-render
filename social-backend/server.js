@@ -163,7 +163,7 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Facebook OAuth strategy and routes (optional if keys present)
+// Facebook OAuth strategy and routes (always mounted, with config checks)
 if (config.facebook.appId && config.facebook.appSecret) {
   passport.use(new FacebookStrategy({
     clientID: config.facebook.appId,
@@ -174,16 +174,23 @@ if (config.facebook.appId && config.facebook.appSecret) {
     profile.accessToken = accessToken;
     return done(null, profile);
   }));
+}
 
-  app.get('/auth/facebook', passport.authenticate('facebook', { scope: ['email', 'public_profile', 'pages_show_list', 'pages_messaging'] }));
+app.get('/auth/facebook', (req, res, next) => {
+  if (!config.facebook.appId || !config.facebook.appSecret) {
+    return res.status(500).send('Facebook auth not configured on server. Set FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, FACEBOOK_CALLBACK.');
+  }
+  return passport.authenticate('facebook', { scope: ['email', 'public_profile', 'pages_show_list', 'pages_messaging'] })(req, res, next);
+});
 
-  app.get('/auth/facebook/callback', passport.authenticate('facebook', {
-    failureRedirect: '/',
-  }), (req, res) => {
-    // Redirect back into SPA after auth
+app.get('/auth/facebook/callback', (req, res, next) => {
+  if (!config.facebook.appId || !config.facebook.appSecret) {
+    return res.redirect('/?error=facebook_not_configured');
+  }
+  return passport.authenticate('facebook', { failureRedirect: '/' })(req, res, () => {
     res.redirect('/dashboard/chats');
   });
-}
+});
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
