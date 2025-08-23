@@ -19,6 +19,7 @@ import ChatSummary from './ChatSummary';
 import QuickReplies from './QuickReplies';
 // Real data endpoints
 const API_BASE = (import.meta?.env?.VITE_MESSENGER_API_URL || import.meta?.env?.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
+const HAS_REMOTE_PROMPT = Boolean(import.meta?.env?.VITE_MESSENGER_API_URL);
 
 const MessengerChat = () => {
   const [contacts, setContacts] = useState([]);
@@ -652,15 +653,17 @@ const MessengerChat = () => {
                     if (!selectedContact?.id) return;
                     const convId = selectedContact.id;
                     const prompt = systemPrompts[convId] || '';
-                    try {
-                      const res = await fetch(`${API_BASE}/api/messenger/system-prompt`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ conversationId: convId, systemPrompt: prompt })
-                      });
-                      if (!res.ok) throw new Error('save_failed');
-                    } catch {}
-                    // Always persist locally as a fallback
+                    if (HAS_REMOTE_PROMPT) {
+                      try {
+                        const res = await fetch(`${API_BASE}/api/messenger/system-prompt`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ conversationId: convId, systemPrompt: prompt })
+                        });
+                        if (!res.ok) throw new Error('save_failed');
+                      } catch {}
+                    }
+                    // Always persist locally
                     try { localStorage.setItem(`wf_sys_prompt_${convId}`, prompt); } catch {}
                   }}
                 >
