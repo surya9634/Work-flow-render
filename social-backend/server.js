@@ -184,16 +184,42 @@ app.get('/auth/facebook', (req, res, next) => {
   if (!config.facebook.appId || !config.facebook.appSecret) {
     return res.status(500).send('Facebook auth not configured on server. Set FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, FACEBOOK_CALLBACK.');
   }
-  return passport.authenticate('facebook', { scope: ['email', 'public_profile', 'pages_show_list', 'pages_messaging'] })(req, res, next);
+  // Request additional scopes needed to list pages and manage messaging/webhooks
+  const scope = ['email', 'public_profile', 'pages_show_list', 'pages_messaging', 'pages_read_engagement', 'pages_manage_metadata'];
+  return passport.authenticate('facebook', { scope })(req, res, next);
 });
 
 app.get('/auth/facebook/callback', (req, res, next) => {
   if (!config.facebook.appId || !config.facebook.appSecret) {
     return res.redirect('/?error=facebook_not_configured');
   }
-  return passport.authenticate('facebook', { failureRedirect: '/' })(req, res, () => {
-    res.redirect('/dashboard/chats');
-  });
+  // Use a custom callback so we can auto-bind a Page after successful login
+  return passport.authenticate('facebook', { failureRedirect: '/' }, async (_err, user) => {
+    try {
+      if (!user || !user.accessToken) {
+        return res.redirect('/?error=facebook_auth_failed');
+      }
+      // Fetch user's pages and pick the first one (can be enhanced to allow selection)
+      const pagesResp = await axios.get('https://graph.facebook.com/v21.0/me/accounts', {
+        params: { access_token: user.accessToken, fields: 'id,name,access_token' }
+      });
+      const firstPage = pagesResp.data && Array.isArray(pagesResp.data.data) ? pagesResp.data.data[0] : null;
+      if (!firstPage || !firstPage.id || !firstPage.access_token) {
+        return res.redirect('/?error=no_page_found');
+      }
+      // Bind Page to runtime config and mark provider as facebook
+      config.facebook.pageId = firstPage.id;
+      config.facebook.pageToken = firstPage.access_token;
+      config.facebook.provider = 'facebook';
+      req.session.facebookConnected = true;
+      // Subscribe app to page webhooks (best-effort)
+      try { await fbSubscribePageIfNeeded(); } catch (_) {}
+      return res.redirect('/dashboard/chats?connected=facebook');
+    } catch (e) {
+      console.error('Facebook auto-bind error:', serializeError(e));
+      return res.redirect('/?error=facebook_bind_failed');
+    }
+  })(req, res, next);
 });
 
 passport.serializeUser((user, done) => done(null, user));
