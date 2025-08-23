@@ -108,7 +108,31 @@ const MessengerChat = () => {
     if (selectedContact?.id && !messages[selectedContact.id]) {
       loadMessages(selectedContact.id);
     }
-    return () => { ignore = true; };
+    // Subscribe to realtime message events
+    let socket;
+    try {
+      // dynamic import to avoid SSR issues
+      import('socket.io-client').then(({ io }) => {
+        if (ignore) return;
+        socket = io(API_BASE, { transports: ['websocket'] });
+        socket.on('messenger:message_created', (payload) => {
+          if (!payload?.conversationId || !payload?.message) return;
+          setMessages(prev => {
+            const arr = prev[payload.conversationId] || [];
+            if (arr.some(m => m.id === payload.message.id)) return prev; // avoid duplicates
+            return { ...prev, [payload.conversationId]: [...arr, payload.message] };
+          });
+        });
+        socket.on('messenger:conversation_created', (conv) => {
+          if (!conv?.id) return;
+          setContacts(prev => [conv, ...prev]);
+        });
+      });
+    } catch (_) {}
+    return () => {
+      ignore = true;
+      if (socket) socket.close();
+    };
   }, [selectedContact?.id]);
 
   // Filter contacts based on search term and sort by most recent activity
