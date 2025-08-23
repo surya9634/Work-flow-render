@@ -653,6 +653,95 @@ app.post('/api/messenger/send-message', async (req, res) => {
   }
 });
 
+// --- Facebook Webhook verification & handler ---
+app.get('/webhook', (req, res) => {
+  try {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    if (mode === 'subscribe' && token === config.webhook.verifyToken) {
+      return res.status(200).send(challenge);
+    }
+    return res.sendStatus(403);
+  } catch (err) {
+    console.error('Webhook verify error:', serializeError(err));
+    return res.sendStatus(500);
+  }
+});
+
+async function fbSubscribePageIfNeeded() {
+  if (config.facebook.provider !== 'facebook' || !config.facebook.pageId || !config.facebook.pageToken) return;
+  try {
+    await axios.post(`https://graph.facebook.com/v21.0/${config.facebook.pageId}/subscribed_apps`, null, {
+      params: {
+        subscribed_fields: [
+          'messages','message_deliveries','messaging_postbacks','messaging_optins','messaging_handovers'
+        ].join(','),
+        access_token: config.facebook.pageToken,
+      }
+    });
+    console.log('Subscribed app to page webhooks.');
+  } catch (err) {
+    console.warn('Subscribe warning:', serializeError(err));
+  }
+}
+
+async function findThreadIdByPsid(psid) {
+  try {
+    const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,participants.limit(10){id}', limit: 200 });
+    const conv = (data.data || []).find(c => {
+      const parts = (c.participants && c.participants.data) || [];
+      return parts.some(p => String(p.id) === String(psid));
+    });
+    return conv ? conv.id : null;
+  } catch (err) {
+    console.error('findThreadIdByPsid error:', serializeError(err));
+    return null;
+  }
+}
+
+app.post('/webhook', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.object !== 'page') return res.sendStatus(404);
+    for (const entry of body.entry || []) {
+      const messaging = entry.messaging || [];
+      for (const event of messaging) {
+        const senderId = event.sender && event.sender.id;
+        const message = event.message;
+        if (senderId && message && (message.text || message.attachments)) {
+          // Resolve thread id for this PSID
+          const threadId = await findThreadIdByPsid(senderId);
+          if (threadId) {
+            // Cache mapping and emit realtime event
+            fbConvParticipants.set(threadId, senderId);
+            const text = message.text || (message.attachments && '[attachment]') || '';
+            io.emit('messenger:message_created', {
+              conversationId: threadId,
+              message: {
+                id: 'fb_' + Date.now(),
+                sender: 'customer',
+                text,
+                timestamp: new Date().toISOString(),
+                isRead: true,
+              }
+            });
+          } else {
+            console.warn('Webhook: could not resolve thread for PSID', senderId);
+          }
+        }
+      }
+    }
+    return res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook handler error:', serializeError(err));
+    return res.sendStatus(500);
+  }
+});
+
+// Kick off subscription on startup (if configured)
+fbSubscribePageIfNeeded();
+
 app.post('/api/whatsapp/send-message', (req, res) => {
   const { phoneNumber, message } = req.body || {};
   if (!phoneNumber || !message) return res.status(400).json({ error: 'Missing required fields' });
