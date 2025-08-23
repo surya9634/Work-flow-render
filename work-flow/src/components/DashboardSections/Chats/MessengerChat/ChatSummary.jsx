@@ -18,11 +18,15 @@ const ChatSummary = ({ contact, messages, isVisible, onToggle }) => {
     let decision = 'In progress';
     const nextSteps = [];
 
+    const stage = contact?.stage || 'new';
+    const intent = (contact?.intent || '').toLowerCase();
+    const tags = Array.isArray(contact?.tags) ? contact.tags : [];
+
     // Generate highlights based on contact stage and intent
-    switch (contact.stage) {
+    switch (stage) {
       case 'contacted':
         highlights.push('Initial contact established');
-        highlights.push(`Interested in ${contact.intent.toLowerCase()}`);
+        if (intent) highlights.push(`Interested in ${intent}`);
         nextSteps.push('Schedule demo or provide more information');
         break;
       case 'qualified':
@@ -61,10 +65,10 @@ const ChatSummary = ({ contact, messages, isVisible, onToggle }) => {
     }
 
     // Add product mentions based on tags
-    if (contact.tags.includes('premium')) products.push('Premium Package');
-    if (contact.tags.includes('enterprise')) products.push('Enterprise Solution');
-    if (contact.tags.includes('basic-plan')) products.push('Basic Plan');
-    if (contact.tags.includes('annual-discount')) products.push('Annual Subscription');
+    if (tags.includes('premium')) products.push('Premium Package');
+    if (tags.includes('enterprise')) products.push('Enterprise Solution');
+    if (tags.includes('basic-plan')) products.push('Basic Plan');
+    if (tags.includes('annual-discount')) products.push('Annual Subscription');
 
     return {
       highlights,
