@@ -318,7 +318,7 @@ const MessengerChat = () => {
 
           {/* Contact List */}
           <div className="flex-1 overflow-y-auto">
-            {filteredContacts.map((contact) => (
+            {(filteredContacts || []).map((contact) => (
               <ContactItem
                 key={contact.id}
                 contact={contact}
@@ -392,7 +392,7 @@ const MessengerChat = () => {
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {messages[selectedContact.id]?.map((message) => (
+                {(messages[selectedContact.id] || []).map((message) => (
                   <MessageBubble
                     key={message.id}
                     message={message}
