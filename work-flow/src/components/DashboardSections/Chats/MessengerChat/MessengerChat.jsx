@@ -12,6 +12,7 @@ const API_BASE = typeof window !== 'undefined' ? window.location.origin : '';
 const MessengerChat = () => {
   const [contacts, setContacts] = useState([]);
   const [messages, setMessages] = useState({}); // { convId: [{id,sender,text,timestamp}] }
+  const [loadingMessages, setLoadingMessages] = useState({}); // convId -> boolean
   const [selectedContact, setSelectedContact] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -92,6 +93,7 @@ const MessengerChat = () => {
     async function loadMessages(convId) {
       try {
         if (!convId) return;
+        setLoadingMessages(prev => ({ ...prev, [convId]: true }));
         const res = await fetch(`${API_BASE}/api/messenger/messages?conversationId=${encodeURIComponent(convId)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to load messages');
@@ -99,6 +101,8 @@ const MessengerChat = () => {
         setMessages(prev => ({ ...prev, [convId]: data }));
       } catch (e) {
         setError(e.message);
+      } finally {
+        setLoadingMessages(prev => ({ ...prev, [convId]: false }));
       }
     }
     if (selectedContact?.id && !messages[selectedContact.id]) {
@@ -392,13 +396,17 @@ const MessengerChat = () => {
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {(messages[selectedContact.id] || []).map((message) => (
-                  <MessageBubble
-                    key={message.id}
-                    message={message}
-                    isAI={message.sender === 'ai'}
-                  />
-                ))}
+                {loadingMessages[selectedContact.id] ? (
+                  <div className="text-center text-gray-400">Loading messages...</div>
+                ) : (
+                  (messages[selectedContact.id] || []).map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      isAI={message.sender === 'ai'}
+                    />
+                  ))
+                )}
               </div>
 
               {/* Message Input */}
