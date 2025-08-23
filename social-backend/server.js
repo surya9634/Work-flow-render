@@ -535,7 +535,10 @@ async function fbApiPost(pathSeg, payload = {}) {
 
 app.get('/api/messenger/conversations', async (_req, res) => {
   try {
-    if (config.facebook.provider === 'facebook' && config.facebook.pageId && config.facebook.pageToken) {
+    if (config.facebook.provider === 'facebook') {
+      if (!config.facebook.pageId || !config.facebook.pageToken) {
+        return res.status(400).json({ error: 'facebook_not_configured' });
+      }
       const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,updated_time,participants.limit(10){id,name,profile_pic}', limit: 200 });
       const convs = (data.data || []).map(c => {
         const participants = (c.participants && c.participants.data) || [];
@@ -567,7 +570,10 @@ app.get('/api/messenger/messages', async (req, res) => {
   const { conversationId } = req.query;
   if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
   try {
-    if (config.facebook.provider === 'facebook' && config.facebook.pageToken) {
+    if (config.facebook.provider === 'facebook') {
+      if (!config.facebook.pageToken || !config.facebook.pageId) {
+        return res.status(400).json({ error: 'facebook_not_configured' });
+      }
       const data = await fbApiGet(`${conversationId}/messages`, { fields: 'message,from,created_time', limit: 50 });
       const items = (data.data || []).reverse().map((m, idx) => ({
         id: m.id || `fb_${idx}`,
