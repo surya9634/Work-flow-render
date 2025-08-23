@@ -486,8 +486,27 @@ function saveMessengerStore() {
 function seedMessengerDataIfEmpty() {
   if (messengerStore.conversations.size > 0) return;
   const now = () => new Date().toISOString();
-  const convs = [];
+  const convs = [
+    { id: 'conv_1', name: 'Aarav Sharma', username: 'aarav.sharma', profilePic: 'https://unavatar.io/aarav.sharma', lastMessage: 'Can you share pricing?', timestamp: now(), unreadCount: 2 },
+    { id: 'conv_2', name: 'Priya Patel', username: 'priya.patel', profilePic: 'https://unavatar.io/priya.patel', lastMessage: 'Thanks for the info!', timestamp: now(), unreadCount: 0 },
+    { id: 'conv_3', name: 'Rohan Gupta', username: 'rohan.g', profilePic: 'https://unavatar.io/rohan.g', lastMessage: 'Let’s schedule a demo.', timestamp: now(), unreadCount: 1 },
+  ];
   convs.forEach(c => messengerStore.conversations.set(c.id, c));
+  messengerStore.messages.set('conv_1', [
+    { id: 'm1', sender: 'customer', text: 'Hi! I am interested in your product.', timestamp: now() },
+    { id: 'm2', sender: 'agent', text: 'Great! What are you looking to automate?', timestamp: now() },
+    { id: 'm3', sender: 'customer', text: 'Can you share pricing?', timestamp: now() },
+  ]);
+  messengerStore.messages.set('conv_2', [
+    { id: 'm4', sender: 'customer', text: 'Appreciate the quick response.', timestamp: now() },
+    { id: 'm5', sender: 'agent', text: 'Happy to help!', timestamp: now() },
+    { id: 'm6', sender: 'customer', text: 'Thanks for the info!', timestamp: now() },
+  ]);
+  messengerStore.messages.set('conv_3', [
+    { id: 'm7', sender: 'customer', text: 'Can we do a demo this week?', timestamp: now() },
+    { id: 'm8', sender: 'agent', text: 'Yes! How about Wednesday 3 PM?', timestamp: now() },
+    { id: 'm9', sender: 'customer', text: 'Let’s schedule a demo.', timestamp: now() },
+  ]);
   saveMessengerStore();
 }
 
