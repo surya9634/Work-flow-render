@@ -3,7 +3,7 @@ import { Edit2, X, Eye } from 'lucide-react';
 import { platforms } from '../../data/platformData';
 
 const ConnectionCard = ({ connection, onEdit, onDisconnect }) => {
-  const platform = platforms[connection.platform];
+  const platform = platforms[connection.platform] || { name: connection.platform || 'Platform', icon: () => null, color: 'bg-gray-400' };
   const Icon = platform.icon;
 
   return (

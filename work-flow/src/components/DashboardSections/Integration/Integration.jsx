@@ -19,7 +19,7 @@ const Integration  = () => {
 
   // Load integration status (facebook/whatsapp/instagram)
   const [status, setStatus] = useState({ facebook: { connected: false }, whatsapp: { connected: false }, instagram: { connected: false } });
-  useEffect(() => {
+  React.useEffect(() => {
     let ignore = false;
     async function loadStatus() {
       try {

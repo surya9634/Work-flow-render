@@ -26,7 +26,7 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
     }
   }, [editingConnection]);
 
-  const platformConfig = platforms[platform];
+  const platformConfig = platforms[platform] || { name: platform || 'Platform', connectionTypes: [] };
 
   const handleConnect = async () => {
     setIsLoading(true);

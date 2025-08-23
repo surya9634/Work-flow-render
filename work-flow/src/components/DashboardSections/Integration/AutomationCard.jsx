@@ -3,7 +3,7 @@ import { Edit2, Trash2, Zap, Calendar, Power } from 'lucide-react';
 import { platforms } from '../../data/platformData';
 
 const AutomationCard = ({ automation, onToggle, onEdit, onDelete }) => {
-  const platform = platforms[automation.platform];
+  const platform = platforms[automation.platform] || { name: automation.platform || 'Platform', icon: () => null, color: 'bg-gray-400' };
   const Icon = platform.icon;
 
   return (
