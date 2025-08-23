@@ -313,7 +313,14 @@ app.post('/api/whatsapp/send-message', (req, res) => {
 
 // Serve frontend build (Vite) from work-flow/dist
 const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
-app.use(express.static(clientDir));
+// Serve frontend build (Vite) with caching and correct content types
+app.use('/assets', express.static(path.join(clientDir, 'assets'), {
+  maxAge: '1y',
+  immutable: true
+}));
+app.use(express.static(clientDir, {
+  maxAge: '1h'
+}));
 
 // SPA fallback: send index.html for non-API routes
 app.get(/^(?!\/api\/).*/, (_req, res) => {
