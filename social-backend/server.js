@@ -40,6 +40,7 @@ const config = {
   },
   ai: {
     geminiKey: process.env.GEMINI_API_KEY || '',
+    autoReplyWebhook: String(process.env.AI_AUTO_REPLY_WEBHOOK || '').toLowerCase() === 'true'
   }
 };
 
@@ -502,18 +503,21 @@ function writeJsonSafe(file, data) {
 const messengerStore = {
   conversations: new Map(), // convId -> { id, name, profilePic, lastMessage, timestamp, unreadCount }
   messages: new Map(), // convId -> [ { id, sender, text, timestamp } ]
+  systemPrompts: new Map(), // convId -> string
 };
 
 function loadMessengerStore() {
-  const json = readJsonSafe(messengerFile, { conversations: [], messages: {} });
+  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {} });
   messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
   messengerStore.messages = new Map(Object.entries(json.messages));
+  messengerStore.systemPrompts = new Map(Object.entries(json.systemPrompts || {}));
 }
 
 function saveMessengerStore() {
   const conversations = Array.from(messengerStore.conversations.values());
   const messages = Object.fromEntries(Array.from(messengerStore.messages.entries()));
-  writeJsonSafe(messengerFile, { conversations, messages });
+  const systemPrompts = Object.fromEntries(Array.from(messengerStore.systemPrompts.entries()));
+  writeJsonSafe(messengerFile, { conversations, messages, systemPrompts });
 }
 
 function seedMessengerDataIfEmpty() {
@@ -572,14 +576,17 @@ async function fbGetProfilePic(psid) {
   }
 }
 
-async function generateWithGemini(prompt) {
+async function generateWithGemini(userText, systemPrompt) {
   if (!config.ai.geminiKey) throw new Error('gemini_key_missing');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
   const payload = {
     contents: [
-      { role: 'user', parts: [{ text: String(prompt || '').slice(0, 4000) }] }
+      { role: 'user', parts: [{ text: String(userText || '').slice(0, 4000) }] }
     ]
   };
+  if (systemPrompt && String(systemPrompt).trim()) {
+    payload.systemInstruction = { role: 'system', parts: [{ text: String(systemPrompt).slice(0, 8000) }] };
+  }
   const resp = await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
   const text = resp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
   return text.trim();
@@ -643,7 +650,8 @@ app.get('/api/messenger/messages', async (req, res) => {
       return res.json(items);
     }
     const msgs = messengerStore.messages.get(conversationId) || [];
-    return res.json(msgs);
+    const systemPrompt = messengerStore.systemPrompts.get(conversationId) || '';
+    return res.json({ messages: msgs, systemPrompt });
   } catch (err) {
     console.error('FB messages error:', serializeError(err));
     return res.status(500).json({ error: 'Error fetching messages' });
@@ -666,6 +674,7 @@ app.post('/api/messenger/conversations', (req, res) => {
   };
   messengerStore.conversations.set(id, conv);
   messengerStore.messages.set(id, []);
+  messengerStore.systemPrompts.set(id, '');
   saveMessengerStore();
   io.emit('messenger:conversation_created', conv);
   return res.json({ success: true, conversation: conv });
@@ -676,9 +685,9 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
     const { conversationId, lastUserMessage, systemPrompt } = req.body || {};
     if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
     if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
-    const baseSystem = String(systemPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
-    const prompt = `${baseSystem}\n\nUser said: "${lastUserMessage || ''}"`;
-    const reply = await generateWithGemini(prompt);
+    const stored = messengerStore.systemPrompts.get(conversationId) || '';
+    const baseSystem = String(systemPrompt || stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+    const reply = await generateWithGemini(String(lastUserMessage || ''), baseSystem);
     const msg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
     io.emit('messenger:message_created', { conversationId, message: msg });
     return res.json({ success: true, message: msg });
@@ -689,9 +698,13 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
 });
 
 app.post('/api/messenger/send-message', async (req, res) => {
-  const { conversationId, text, sender } = req.body || {};
+  const { conversationId, text, sender, systemPrompt } = req.body || {};
   if (!conversationId || !text) return res.status(400).json({ error: 'Missing required fields' });
   try {
+    if (typeof systemPrompt === 'string') {
+      messengerStore.systemPrompts.set(conversationId, systemPrompt);
+      saveMessengerStore();
+    }
     if (config.facebook.provider === 'facebook' && config.facebook.pageToken) {
       // For Facebook, we need the participant PSID for this thread
       let recipientId = fbConvParticipants.get(conversationId);
@@ -808,9 +821,11 @@ app.post('/webhook', async (req, res) => {
               }
             });
             // Optional: auto-reply with Gemini when message text exists
-            if (text && config.ai.geminiKey && config.facebook.pageToken) {
+            if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook) {
               try {
-                const reply = await generateWithGemini(`You are a helpful business chat assistant. Reply concisely and politely. User said: "${text}"`);
+                const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
+                const baseSystem = String(storedPrompt || 'You are a helpful business chat assistant. Reply concisely and politely.').trim();
+                const reply = await generateWithGemini(String(text || ''), baseSystem);
                 if (reply) {
                   // Send reply via FB API
                   await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
@@ -860,12 +875,27 @@ app.use(express.static(clientDir, {
   maxAge: '1h'
 }));
 
+// Save or fetch system prompt for a conversation
+app.post('/api/messenger/system-prompt', (req, res) => {
+  try {
+    const { conversationId, systemPrompt } = req.body || {};
+    if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+    messengerStore.systemPrompts.set(conversationId, String(systemPrompt || ''));
+    saveMessengerStore();
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Save system prompt error:', serializeError(err));
+    return res.status(500).json({ error: 'save_system_prompt_failed' });
+  }
+});
+
 // Simple AI test endpoint for /ai-chat page
 app.post('/api/ai/test', async (req, res) => {
   try {
     const prompt = (req.body && req.body.prompt) || 'Say hello!';
+    const systemPrompt = (req.body && req.body.systemPrompt) || '';
     if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
-    const text = await generateWithGemini(String(prompt));
+    const text = await generateWithGemini(String(prompt), String(systemPrompt));
     return res.json({ text });
   } catch (err) {
     console.error('AI test error:', serializeError(err));
