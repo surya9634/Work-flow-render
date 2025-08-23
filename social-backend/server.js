@@ -48,6 +48,7 @@ console.log('=====================================');
 console.log(`PORT: ${PORT}`);
 console.log(`Instagram App ID set: ${!!config.instagram.appId}`);
 console.log(`Facebook App ID set: ${!!config.facebook.appId}`);
+console.log(`Facebook Callback URL: ${config.facebook.callbackUrl}`);
 console.log(`WhatsApp Phone ID set: ${!!config.whatsapp.phoneNumberId}`);
 console.log('=====================================');
 
@@ -184,6 +185,7 @@ app.get('/auth/facebook', (req, res, next) => {
   if (!config.facebook.appId || !config.facebook.appSecret) {
     return res.status(500).send('Facebook auth not configured on server. Set FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, FACEBOOK_CALLBACK.');
   }
+  console.log(`[FB OAuth] Redirecting to Facebook with callbackURL=${config.facebook.callbackUrl}`);
   // Request additional scopes needed to list pages and manage messaging/webhooks
   const scope = ['email', 'public_profile', 'pages_show_list', 'pages_messaging', 'pages_read_engagement', 'pages_manage_metadata'];
   return passport.authenticate('facebook', { scope })(req, res, next);

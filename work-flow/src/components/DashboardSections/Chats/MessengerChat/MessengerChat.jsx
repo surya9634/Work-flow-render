@@ -1,4 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
+
+// AutoScroll helper: scrolls chat container to bottom when messages change
+const AutoScroll = ({ conversationId, messages }) => {
+  useEffect(() => {
+    const el = document.getElementById('chat-scroll-container');
+    if (!el) return;
+    // Smooth scroll to bottom
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [conversationId, messages?.length]);
+  return null;
+};
 import { Search, Send, Paperclip, Smile, Bot, BotOff, ChevronUp, ChevronDown } from 'lucide-react';
 import ContactItem from './ContactItem';
 import MessageBubble from './MessageBubble';
@@ -122,10 +133,22 @@ const MessengerChat = () => {
             if (arr.some(m => m.id === payload.message.id)) return prev; // avoid duplicates
             return { ...prev, [payload.conversationId]: [...arr, payload.message] };
           });
+          // Update contact preview and bump ordering
+          const preview = payload.message.text || payload.message.message || '';
+          updateContactPreview(payload.conversationId, preview);
         });
         socket.on('messenger:conversation_created', (conv) => {
           if (!conv?.id) return;
-          setContacts(prev => [conv, ...prev]);
+          const normalized = {
+            id: conv.id,
+            name: conv.name,
+            avatar: conv.profilePic || `https://unavatar.io/${encodeURIComponent(conv.name || 'user')}`,
+            lastMessage: conv.lastMessage || '',
+            timestamp: 'now',
+            isOnline: true,
+            lastUpdated: conv.timestamp || new Date().toISOString(),
+          };
+          setContacts(prev => [normalized, ...prev]);
         });
       });
     } catch (_) {}
@@ -419,7 +442,7 @@ const MessengerChat = () => {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 space-y-4" id="chat-scroll-container">
                 {loadingMessages[selectedContact.id] ? (
                   <div className="text-center text-gray-400">Loading messages...</div>
                 ) : (
@@ -432,6 +455,9 @@ const MessengerChat = () => {
                   ))
                 )}
               </div>
+
+              {/* Auto-scroll to bottom when new messages arrive */}
+              <AutoScroll conversationId={selectedContact.id} messages={(messages[selectedContact.id] || [])} />
 
               {/* Message Input */}
               <div className="bg-white border-t border-gray-200 p-4">
