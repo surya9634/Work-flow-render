@@ -110,8 +110,13 @@ const MessengerChat = () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to load messages');
         if (ignore) return;
+        const arr = Array.isArray(data) ? data : (data.messages || []);
+        const sysPrompt = Array.isArray(data) ? '' : (data.systemPrompt || '');
+        if (sysPrompt) {
+          setSystemPrompts(prev => ({ ...prev, [convId]: sysPrompt }));
+        }
         // Normalize timestamps to always display HH:mm only
-        const normalized = (data || []).map(m => ({
+        const normalized = (arr || []).map(m => ({
           ...m,
           // Keep raw ISO in a separate field if needed for sorting later
           _iso: m.timestamp,
@@ -636,6 +641,23 @@ const MessengerChat = () => {
                   setSystemPrompts(prev => ({ ...prev, [id]: v }));
                 }}
               />
+              <div className="mt-2 text-right">
+                <button
+                  className="px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                  onClick={async () => {
+                    if (!selectedContact?.id) return;
+                    try {
+                      await fetch(`${API_BASE}/api/messenger/system-prompt`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ conversationId: selectedContact.id, systemPrompt: systemPrompts[selectedContact.id] || '' })
+                      });
+                    } catch {}
+                  }}
+                >
+                  Enter
+                </button>
+              </div>
               <p className="text-xs text-gray-500 mt-1">Used when AI Mode is ON to guide replies for this conversation.</p>
             </div>
 
