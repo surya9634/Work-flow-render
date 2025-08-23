@@ -109,7 +109,17 @@ const MessengerChat = () => {
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to load messages');
         if (ignore) return;
-        setMessages(prev => ({ ...prev, [convId]: data }));
+        // Normalize timestamps to always display HH:mm only
+        const normalized = (data || []).map(m => ({
+          ...m,
+          // Keep raw ISO in a separate field if needed for sorting later
+          _iso: m.timestamp,
+          timestamp: (() => {
+            const d = new Date(m.timestamp);
+            return isNaN(d.getTime()) ? (m.timestamp || '') : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          })()
+        }));
+        setMessages(prev => ({ ...prev, [convId]: normalized }));
       } catch (e) {
         setError(e.message);
       } finally {
@@ -128,13 +138,22 @@ const MessengerChat = () => {
         socket = io(API_BASE, { transports: ['websocket'] });
         socket.on('messenger:message_created', (payload) => {
           if (!payload?.conversationId || !payload?.message) return;
+          const incoming = payload.message;
+          const normalized = {
+            ...incoming,
+            _iso: incoming.timestamp,
+            timestamp: (() => {
+              const d = new Date(incoming.timestamp);
+              return isNaN(d.getTime()) ? (incoming.timestamp || '') : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            })()
+          };
           setMessages(prev => {
             const arr = prev[payload.conversationId] || [];
-            if (arr.some(m => m.id === payload.message.id)) return prev; // avoid duplicates
-            return { ...prev, [payload.conversationId]: [...arr, payload.message] };
+            if (arr.some(m => m.id === normalized.id)) return prev; // avoid duplicates
+            return { ...prev, [payload.conversationId]: [...arr, normalized] };
           });
           // Update contact preview and bump ordering
-          const preview = payload.message.text || payload.message.message || '';
+          const preview = normalized.text || normalized.message || '';
           updateContactPreview(payload.conversationId, preview);
         });
         socket.on('messenger:conversation_created', (conv) => {

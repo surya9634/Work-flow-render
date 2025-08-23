@@ -574,7 +574,7 @@ async function fbGetProfilePic(psid) {
 
 async function generateWithGemini(prompt) {
   if (!config.ai.geminiKey) throw new Error('gemini_key_missing');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
   const payload = {
     contents: [
       { role: 'user', parts: [{ text: String(prompt || '').slice(0, 4000) }] }

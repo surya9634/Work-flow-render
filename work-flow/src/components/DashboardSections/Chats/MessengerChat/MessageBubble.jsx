@@ -4,7 +4,17 @@ import { Check, CheckCheck } from 'lucide-react';
 const MessageBubble = ({ message, isAI = false }) => {
   const isCustomer = message.sender === 'customer';
   const text = message.text || message.message || '';
-  const time = message.timestamp || '';
+  // Always show only HH:mm; if timestamp looks ISO, convert, else show as-is
+  const time = (() => {
+    const t = message.timestamp || '';
+    const d = new Date(t);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    // If already a short time like "15:07", just return
+    if (/^\d{1,2}:\d{2}$/.test(String(t))) return t;
+    return String(t);
+  })();
   
   return (
     <div className={`flex mb-4 ${isCustomer ? 'justify-start' : 'justify-end'}`}>
