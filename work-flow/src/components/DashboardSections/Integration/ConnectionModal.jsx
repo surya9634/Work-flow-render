@@ -118,7 +118,12 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
               Click "Connect with Facebook" to authorize access to your Facebook Pages and Messenger.
             </p>
           </div>
-          <button className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+          <button
+            onClick={() => {
+              window.location.href = `${window.location.origin}/auth/facebook`;
+            }}
+            className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+          >
             Connect with Facebook
           </button>
         </div>

@@ -163,6 +163,28 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Facebook OAuth strategy and routes (optional if keys present)
+if (config.facebook.appId && config.facebook.appSecret) {
+  passport.use(new FacebookStrategy({
+    clientID: config.facebook.appId,
+    clientSecret: config.facebook.appSecret,
+    callbackURL: config.facebook.callbackUrl,
+    profileFields: ['id', 'displayName', 'emails'],
+  }, (accessToken, refreshToken, profile, done) => {
+    profile.accessToken = accessToken;
+    return done(null, profile);
+  }));
+
+  app.get('/auth/facebook', passport.authenticate('facebook', { scope: ['email', 'public_profile', 'pages_show_list', 'pages_messaging'] }));
+
+  app.get('/auth/facebook/callback', passport.authenticate('facebook', {
+    failureRedirect: '/',
+  }), (req, res) => {
+    // Redirect back into SPA after auth
+    res.redirect('/dashboard/chats');
+  });
+}
+
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
