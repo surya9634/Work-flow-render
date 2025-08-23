@@ -152,6 +152,8 @@ const MessengerChat = () => {
           const incoming = payload.message;
           const normalized = {
             ...incoming,
+            // unify payload shape (some places use `text`, others `message`)
+            text: (incoming.text ?? incoming.message ?? ''),
             _iso: incoming.timestamp,
             timestamp: (() => {
               const d = new Date(incoming.timestamp);
@@ -168,11 +170,14 @@ const MessengerChat = () => {
           updateContactPreview(payload.conversationId, preview);
 
           // Auto-trigger backend AI reply when AI Mode is ON and a customer message arrives
+          // NOTE: Server already auto-replies for customer messages when enabled.
+          // To avoid double replies, do not trigger client-side when provider is local.
           try {
             const convId = payload.conversationId;
             const isCustomer = String(normalized.sender).toLowerCase() === 'customer';
-            if (isCustomer && aiMode[convId]) {
-              const lastUserMessage = normalized.text || normalized.message || '';
+            const isRemoteProvider = Boolean(import.meta?.env?.VITE_MESSENGER_API_URL); // remote FB uses webhook, safe to skip
+            if (isCustomer && aiMode[convId] && isRemoteProvider) {
+              const lastUserMessage = normalized.text || '';
               const systemPrompt = systemPrompts[convId] || '';
               if (lastUserMessage.trim()) {
                 fetch(`${API_BASE}/api/messenger/ai-reply`, {
@@ -237,20 +242,16 @@ const MessengerChat = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to send message');
-      const userMsg = { id: data.message.id, sender: 'agent', message: messageText, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isRead: true };
-      setMessages(prev => ({ ...prev, [selectedContact.id]: [...(prev[selectedContact.id] || []), userMsg] }));
+      const msgId = data?.message?.id;
+      const userMsg = { id: msgId, sender: 'agent', text: messageText, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), isRead: true };
+      // Add locally only if socket hasn't already added it
+      setMessages(prev => {
+        const arr = prev[selectedContact.id] || [];
+        if (msgId && arr.some(m => m.id === msgId)) return prev; // avoid duplicates
+        return { ...prev, [selectedContact.id]: [...arr, userMsg] };
+      });
       updateContactPreview(selectedContact.id, messageText);
-      if (aiMode[selectedContact.id]) {
-        // Ask backend AI to reply using Gemini
-        try {
-          const systemPrompt = systemPrompts[selectedContact.id] || '';
-          await fetch(`${API_BASE}/api/messenger/ai-reply`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ conversationId: selectedContact.id, lastUserMessage: messageText, systemPrompt })
-          });
-        } catch (_) {}
-      }
+      // Do NOT trigger AI reply on agent send; server handles auto-replies for customer messages
     } catch (err) {
       setError(err.message);
     }
