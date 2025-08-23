@@ -135,7 +135,10 @@ const OnboardingForm = () => {
     try {
       // Get user info from localStorage
       const userString = localStorage.getItem('user');
-      const token = localStorage.getItem('authToken');
+      const token = localStorage.getItem('authToken') || localStorage.getItem('token');
+
+      // Resolve API base
+      const API_BASE = (import.meta?.env?.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
       
       if (!userString || !token) {
         toast.error('Authentication required. Please login again.');
@@ -146,7 +149,7 @@ const OnboardingForm = () => {
       const user = JSON.parse(userString);
       
       // Send onboarding data to backend
-      const response = await fetch(`${window.location.origin}/api/onboarding`, {
+      const response = await fetch(`${API_BASE}/api/onboarding`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

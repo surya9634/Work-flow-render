@@ -58,8 +58,9 @@ const Auth = ({
       }
 
       // Success
-      // Store token in localStorage
+      // Store token in localStorage (support both keys used elsewhere)
       localStorage.setItem('authToken', data.token);
+      localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       
       // Call success callback if provided

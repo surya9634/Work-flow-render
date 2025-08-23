@@ -46,7 +46,8 @@ const WorkFlowLanding = () => {
   
   try {
     const endpoint = isLogin ? '/api/auth/signin' : '/api/auth/signup';
-    const response = await fetch(`${window.location.origin}${endpoint}`, {
+    const API_BASE = (import.meta?.env?.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')).replace(/\/$/, '');
+    const response = await fetch(`${API_BASE}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
