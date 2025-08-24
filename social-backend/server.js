@@ -34,6 +34,7 @@ const config = {
   whatsapp: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'verify-me',
+    token: process.env.WHATSAPP_TOKEN || process.env.FB_PAGE_TOKEN || process.env.PAGE_ACCESS_TOKEN || ''
   },
   webhook: {
     verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || 'WORKFLOW_VERIFY_TOKEN',
@@ -708,6 +709,25 @@ app.post('/api/messenger/send-message', async (req, res) => {
       messengerStore.systemPrompts.set(conversationId, systemPrompt);
       saveMessengerStore();
     }
+
+    // WhatsApp outbound via Cloud API
+    if (String(conversationId).startsWith('wa_') && config.whatsapp.token && config.whatsapp.phoneNumberId) {
+      const toPhone = String(conversationId).slice(3);
+      try {
+        await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+          messaging_product: 'whatsapp',
+          to: toPhone,
+          type: 'text',
+          text: { body: String(text).slice(0, 900) }
+        }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
+      } catch (waSendErr) {
+        console.error('WA outbound send error:', serializeError(waSendErr));
+      }
+      const msg = { id: 'wa_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
+      io.emit('messenger:message_created', { conversationId, message: msg });
+      return res.json({ success: true, message: msg });
+    }
+
     if (config.facebook.provider === 'facebook' && config.facebook.pageToken) {
       // For Facebook, we need the participant PSID for this thread
       let recipientId = fbConvParticipants.get(conversationId);
@@ -774,13 +794,13 @@ app.post('/api/messenger/send-message', async (req, res) => {
   }
 });
 
-// --- Facebook Webhook verification & handler ---
+// --- Webhook verification (Facebook/WhatsApp share the same mechanism) ---
 app.get('/webhook', (req, res) => {
   try {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
-    if (mode === 'subscribe' && token === config.webhook.verifyToken) {
+    if (mode === 'subscribe' && (token === config.webhook.verifyToken || token === config.whatsapp.verifyToken)) {
       return res.status(200).send(challenge);
     }
     return res.sendStatus(403);
@@ -824,6 +844,73 @@ async function findThreadIdByPsid(psid) {
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body || {};
+
+    // WhatsApp webhook structure
+    if (body.object === 'whatsapp_business_account') {
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          const value = change.value || {};
+          const messages = value.messages || [];
+          const contacts = value.contacts || [];
+          for (const m of messages) {
+            if (!m.from) continue;
+            // Build or find conversation by WhatsApp phone number
+            const convId = 'wa_' + m.from; // stable per sender
+            let conv = messengerStore.conversations.get(convId);
+            if (!conv) {
+              const name = (contacts[0] && contacts[0].profile && contacts[0].profile.name) || (contacts[0] && contacts[0].wa_id) || m.from;
+              conv = { id: convId, name: name || ('+' + m.from), profilePic: `https://unavatar.io/${encodeURIComponent(name || m.from)}`, lastMessage: '', timestamp: new Date().toISOString(), unreadCount: 0 };
+              messengerStore.conversations.set(convId, conv);
+              messengerStore.messages.set(convId, []);
+              saveMessengerStore();
+              io.emit('messenger:conversation_created', conv);
+            }
+            const text = (m.text && m.text.body) || (m.type === 'button' && m.button && m.button.text) || '';
+            const msg = { id: m.id || ('wa_' + Date.now()), sender: 'customer', text, timestamp: new Date().toISOString(), isRead: true };
+            const arr = messengerStore.messages.get(convId) || [];
+            arr.push(msg);
+            messengerStore.messages.set(convId, arr);
+            conv.lastMessage = text;
+            conv.timestamp = new Date().toISOString();
+            messengerStore.conversations.set(convId, conv);
+            saveMessengerStore();
+            io.emit('messenger:message_created', { conversationId: convId, message: msg });
+
+            // AI auto-reply if enabled
+            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && config.whatsapp.token && config.whatsapp.phoneNumberId) {
+              try {
+                const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
+                const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+                const reply = await generateWithGemini(String(text || ''), baseSystem);
+                if (reply) {
+                  // Send reply via WhatsApp Cloud API
+                  await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+                    messaging_product: 'whatsapp',
+                    to: m.from,
+                    type: 'text',
+                    text: { body: reply.slice(0, 900) }
+                  }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
+
+                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
+                  arr.push(aiMsg);
+                  messengerStore.messages.set(convId, arr);
+                  conv.lastMessage = reply;
+                  conv.timestamp = new Date().toISOString();
+                  messengerStore.conversations.set(convId, conv);
+                  saveMessengerStore();
+                  io.emit('messenger:message_created', { conversationId: convId, message: aiMsg });
+                }
+              } catch (waAIerr) {
+                console.warn('WA auto-reply failed:', serializeError(waAIerr));
+              }
+            }
+          }
+        }
+      }
+      return res.sendStatus(200);
+    }
+
+    // Facebook webhook structure
     if (body.object !== 'page') return res.sendStatus(404);
     for (const entry of body.entry || []) {
       const messaging = entry.messaging || [];
@@ -887,10 +974,23 @@ app.post('/webhook', async (req, res) => {
 // Kick off subscription on startup (if configured)
 fbSubscribePageIfNeeded();
 
-app.post('/api/whatsapp/send-message', (req, res) => {
-  const { phoneNumber, message } = req.body || {};
-  if (!phoneNumber || !message) return res.status(400).json({ error: 'Missing required fields' });
-  res.json({ success: true, to: phoneNumber, message });
+// Send outbound WhatsApp message via Cloud API (manual send from UI)
+app.post('/api/whatsapp/send-message', async (req, res) => {
+  try {
+    const { phoneNumber, message } = req.body || {};
+    if (!phoneNumber || !message) return res.status(400).json({ error: 'Missing required fields' });
+    if (!config.whatsapp.phoneNumberId || !config.whatsapp.token) return res.status(400).json({ error: 'whatsapp_not_configured' });
+    const resp = await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+      messaging_product: 'whatsapp',
+      to: phoneNumber,
+      type: 'text',
+      text: { body: String(message).slice(0, 900) }
+    }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
+    return res.json({ success: true, result: resp.data });
+  } catch (err) {
+    console.error('WA send error:', serializeError(err));
+    return res.status(500).json({ error: 'whatsapp_send_failed' });
+  }
 });
 
 // Serve frontend build (Vite) from work-flow/dist
