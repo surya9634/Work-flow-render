@@ -639,17 +639,15 @@ const MessengerChat = () => {
                     if (!selectedContact?.id) return;
                     const convId = selectedContact.id;
                     const prompt = systemPrompts[convId] || '';
-                    if (HAS_REMOTE_PROMPT) {
-                      try {
-                        const res = await fetch(`${API_BASE}/api/messenger/system-prompt`, {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ conversationId: convId, systemPrompt: prompt })
-                        });
-                        if (!res.ok) throw new Error('save_failed');
-                      } catch {}
-                    }
-                    // Always persist locally
+                    try {
+                      const res = await fetch(`${API_BASE}/api/messenger/system-prompt`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ conversationId: convId, systemPrompt: prompt })
+                      });
+                      if (!res.ok) throw new Error('save_failed');
+                    } catch {}
+                    // Also persist locally for UI restore
                     try { localStorage.setItem(`wf_sys_prompt_${convId}`, prompt); } catch {}
                   }}
                 >

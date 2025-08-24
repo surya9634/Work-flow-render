@@ -748,7 +748,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
     if ((senderNorm === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook) {
       try {
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
-        const baseSystem = String(stored || 'You are a helpful business chat assistant. Reply concisely and politely.').trim();
+        const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
         const replyText = await generateWithGemini(String(text || ''), baseSystem);
         if (replyText) {
           const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: replyText, timestamp: new Date().toISOString(), isRead: true };
@@ -853,7 +853,7 @@ app.post('/webhook', async (req, res) => {
             if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
-                const baseSystem = String(storedPrompt || 'You are a helpful business chat assistant. Reply concisely and politely.').trim();
+                const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
                 const reply = await generateWithGemini(String(text || ''), baseSystem);
                 if (reply) {
                   // Send reply via FB API
