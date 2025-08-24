@@ -456,8 +456,7 @@ app.get('/api/user-info', (req, res) => {
   });
 });
 
-// Simple placeholders for Messenger/WhatsApp until keys/pages are configured
-// Integration status endpoint (session-based)
+// Integration status endpoint
 app.get('/api/integrations/status', (req, res) => {
   res.json({
     facebook: {
@@ -468,7 +467,8 @@ app.get('/api/integrations/status', (req, res) => {
       connected: false,
     },
     whatsapp: {
-      connected: false,
+      connected: !!(config.whatsapp.phoneNumberId && config.whatsapp.token),
+      phoneNumberId: config.whatsapp.phoneNumberId || null,
     }
   });
 });
@@ -973,6 +973,19 @@ app.post('/webhook', async (req, res) => {
 
 // Kick off subscription on startup (if configured)
 fbSubscribePageIfNeeded();
+
+// Save WhatsApp credentials from UI (in-memory for runtime)
+app.post('/api/integrations/whatsapp/config', (req, res) => {
+  try {
+    const { token, phoneNumberId } = req.body || {};
+    if (!token || !phoneNumberId) return res.status(400).json({ success: false, message: 'token and phoneNumberId required' });
+    config.whatsapp.token = String(token);
+    config.whatsapp.phoneNumberId = String(phoneNumberId);
+    return res.json({ success: true, whatsapp: { connected: true, phoneNumberId: config.whatsapp.phoneNumberId } });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'internal_error' });
+  }
+});
 
 // Send outbound WhatsApp message via Cloud API (manual send from UI)
 app.post('/api/whatsapp/send-message', async (req, res) => {
