@@ -119,7 +119,7 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
         if (!res.ok || !data?.success) throw new Error(data?.message || 'create_failed');
         const campId = data.campaign.id;
         // Start campaign (creates conversation, sets system prompt, sends initial message)
-        const startRes = await fetch(`/api/campaigns/${campId}/start`, { method: 'POST' });
+        const startRes = await fetch(`/api/campaigns/${campId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: campaignData?.conversationId || null }) });
         const startData = await startRes.json();
         if (!startRes.ok || !startData?.success) throw new Error(startData?.message || 'start_failed');
         onSave(data.campaign);

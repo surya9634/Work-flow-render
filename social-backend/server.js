@@ -634,8 +634,41 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
     let conversationId = null;
 
     if (platform === 'facebook' && config.facebook.provider === 'facebook' && config.facebook.pageToken && config.facebook.pageId) {
-      // Real FB requires an existing thread; if not provided, we start in local store as a fallback
-      // Fallback to local
+      // Use provided conversationId or pick the latest page conversation
+      let fbThreadId = (req.body && req.body.conversationId) || null;
+      try {
+        if (!fbThreadId) {
+          const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,updated_time,participants.limit(10){id,name}', limit: 1 });
+          const first = (data.data || [])[0];
+          if (first && first.id) fbThreadId = first.id;
+        }
+        if (fbThreadId) {
+          // Cache PSID for send API
+          try {
+            const conv = await fbApiGet(`${fbThreadId}`, { fields: 'participants.limit(10){id,name}' });
+            const parts = (conv.participants && conv.participants.data) || [];
+            const other = parts.find(p => String(p.id) !== String(config.facebook.pageId)) || parts[0];
+            if (other && other.id) fbConvParticipants.set(fbThreadId, other.id);
+          } catch (_) {}
+
+          // Set system prompt for this thread
+          messengerStore.systemPrompts.set(fbThreadId, buildSystemPromptFromCampaign(campaign));
+          saveMessengerStore();
+
+          // Send initial message via Facebook
+          const text = String(campaign?.message?.initialMessage || '').trim() || `Hi! This is ${campaign?.persona?.name || 'our team'} from ${makeCampaignNameFromDescription(campaign?.brief?.description || '')}. How can we help you today?`;
+          await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+            recipient: { id: fbConvParticipants.get(fbThreadId) },
+            message: { text: text.slice(0, 900) }
+          }, { params: { access_token: config.facebook.pageToken } });
+
+          // Emit to frontend and mark conversationId
+          io.emit('messenger:message_created', { conversationId: fbThreadId, message: { id: 'm_' + Date.now(), sender: 'agent', text, timestamp: new Date().toISOString(), isRead: true } });
+          conversationId = fbThreadId;
+        }
+      } catch (fbStartErr) {
+        console.warn('FB campaign start send failed:', serializeError(fbStartErr));
+      }
     }
 
     // Local/simulated conversation
