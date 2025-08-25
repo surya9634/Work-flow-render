@@ -674,6 +674,47 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
     saveMessengerStore();
     io.emit('messenger:message_created', { conversationId, message: msg });
 
+    // If running locally (not FB/WA thread), simulate a customer message to kick off AI
+    try {
+      const isLocalConv = !String(conversationId).startsWith('wa_') && config.facebook.provider !== 'facebook';
+      if (isLocalConv && config.ai.geminiKey && config.ai.autoReplyWebhook) {
+        const customerText = campaign?.flow?.objective
+          ? `Hi, I want to know more about ${campaign.flow.objective}.`
+          : 'Hi, can you tell me more?';
+        const custMsg = { id: 'c_' + Date.now(), sender: 'customer', text: customerText, timestamp: new Date().toISOString(), isRead: true };
+        arr.push(custMsg);
+        messengerStore.messages.set(conversationId, arr);
+        const conv2 = messengerStore.conversations.get(conversationId);
+        if (conv2) {
+          conv2.lastMessage = customerText;
+          conv2.timestamp = new Date().toISOString();
+          messengerStore.conversations.set(conversationId, conv2);
+        }
+        saveMessengerStore();
+        io.emit('messenger:message_created', { conversationId, message: custMsg });
+
+        // Generate AI reply
+        const stored = messengerStore.systemPrompts.get(conversationId) || '';
+        const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+        const replyText = await generateWithGemini(String(customerText), baseSystem);
+        if (replyText) {
+          const aiMsg = { id: 'ai_' + (Date.now() + 1), sender: 'ai', text: replyText, timestamp: new Date().toISOString(), isRead: true };
+          arr.push(aiMsg);
+          messengerStore.messages.set(conversationId, arr);
+          const conv3 = messengerStore.conversations.get(conversationId);
+          if (conv3) {
+            conv3.lastMessage = replyText;
+            conv3.timestamp = new Date().toISOString();
+            messengerStore.conversations.set(conversationId, conv3);
+          }
+          saveMessengerStore();
+          io.emit('messenger:message_created', { conversationId, message: aiMsg });
+        }
+      }
+    } catch (simErr) {
+      console.warn('Campaign start simulation failed:', serializeError(simErr));
+    }
+
     // Mark campaign active
     campaign.status = 'active';
     campaign.startedAt = new Date().toISOString();
