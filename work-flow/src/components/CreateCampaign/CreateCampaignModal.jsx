@@ -20,6 +20,7 @@ const STEPS = [
 
 const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
   const [currentStep, setCurrentStep] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [campaignData, setCampaignData] = useState({
     brief: {
       description: '',
@@ -104,10 +105,12 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
   };
 
   const handleFinish = async () => {
+    if (isSubmitting) return; // prevent double-clicks
     const isValid = validateStep(currentStep);
     setStepValidation(prev => ({ ...prev, [currentStep]: isValid }));
     
     if (isValid) {
+      setIsSubmitting(true);
       try {
         // Create campaign in backend
         const res = await fetch('/api/campaigns', {
@@ -123,10 +126,12 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
         const startData = await startRes.json();
         if (!startRes.ok || !startData?.success) throw new Error(startData?.message || 'start_failed');
         onSave(data.campaign);
+        onClose();
       } catch (e) {
         console.error('Campaign create/start failed:', e);
+      } finally {
+        setIsSubmitting(false);
       }
-      onClose();
     }
   };
 
@@ -240,9 +245,10 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
               ) : (
                 <button
                   onClick={handleFinish}
-                  className="px-6 py-2 bg-gradient-to-r from-green-500 to-blue-600 text-white rounded-lg hover:from-green-600 hover:to-blue-700 transition-all duration-200"
+                  disabled={isSubmitting}
+                  className={`px-6 py-2 rounded-lg transition-all duration-200 text-white ${isSubmitting ? 'bg-gray-400 cursor-not-allowed' : 'bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700'}`}
                 >
-                  Create Campaign
+                  {isSubmitting ? 'Creating…' : 'Create Campaign'}
                 </button>
               )}
             </div>
