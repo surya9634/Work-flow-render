@@ -656,6 +656,8 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
           // Set system prompt for this thread
           messengerStore.systemPrompts.set(fbThreadId, buildSystemPromptFromCampaign(campaign));
           saveMessengerStore();
+          // Default AI mode OFF unless user explicitly turns it on later
+          aiModeByConversation.set(fbThreadId, false);
 
           // Send initial message via Facebook
           const text = String(campaign?.message?.initialMessage || '').trim() || `Hi! This is ${campaign?.persona?.name || 'our team'} from ${makeCampaignNameFromDescription(campaign?.brief?.description || '')}. How can we help you today?`;
@@ -816,6 +818,8 @@ app.get('/api/messenger/conversations', async (_req, res) => {
         const other = participants.find(p => String(p.id) !== String(config.facebook.pageId)) || participants[0] || {};
         // Cache PSID for send API
         if (c.id && other.id) fbConvParticipants.set(c.id, other.id);
+        // Ensure AI mode default is OFF for FB threads unless explicitly enabled
+        if (c.id && !aiModeByConversation.has(c.id)) aiModeByConversation.set(c.id, false);
         // Try to get real FB profile picture
         let profilePic = other.profile_pic || null;
         if (!profilePic && other.id) {
@@ -1090,8 +1094,8 @@ app.post('/webhook', async (req, res) => {
             saveMessengerStore();
             io.emit('messenger:message_created', { conversationId: convId, message: msg });
 
-            // AI auto-reply if enabled
-            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && config.whatsapp.token && config.whatsapp.phoneNumberId) {
+            // AI auto-reply if enabled (and AI mode ON for this conversation)
+            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && config.whatsapp.token && config.whatsapp.phoneNumberId && (aiModeByConversation.get(convId) === true)) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
                 const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
@@ -1150,8 +1154,8 @@ app.post('/webhook', async (req, res) => {
                 isRead: true,
               }
             });
-            // Optional: auto-reply with Gemini when message text exists
-            if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook) {
+            // Optional: auto-reply with Gemini when message text exists and AI mode is ON for this thread
+            if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
                 const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
