@@ -507,20 +507,26 @@ const messengerStore = {
   conversations: new Map(), // convId -> { id, name, profilePic, lastMessage, timestamp, unreadCount }
   messages: new Map(), // convId -> [ { id, sender, text, timestamp } ]
   systemPrompts: new Map(), // convId -> string
+  responseTimes: new Map(), // convId -> number[] (ms)
 };
 
+// Track last customer message time per conversation for response time measurement (not persisted)
+const lastCustomerAtByConversation = new Map();
+
 function loadMessengerStore() {
-  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {} });
+  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {} });
   messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
   messengerStore.messages = new Map(Object.entries(json.messages));
   messengerStore.systemPrompts = new Map(Object.entries(json.systemPrompts || {}));
+  messengerStore.responseTimes = new Map(Object.entries(json.responseTimes || {}));
 }
 
 function saveMessengerStore() {
   const conversations = Array.from(messengerStore.conversations.values());
   const messages = Object.fromEntries(Array.from(messengerStore.messages.entries()));
   const systemPrompts = Object.fromEntries(Array.from(messengerStore.systemPrompts.entries()));
-  writeJsonSafe(messengerFile, { conversations, messages, systemPrompts });
+  const responseTimes = Object.fromEntries(Array.from(messengerStore.responseTimes.entries()));
+  writeJsonSafe(messengerFile, { conversations, messages, systemPrompts, responseTimes });
 }
 
 function seedMessengerDataIfEmpty() {
@@ -960,7 +966,23 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
     const stored = messengerStore.systemPrompts.get(conversationId) || '';
     const baseSystem = String(systemPrompt || stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
     const reply = await generateWithGemini(String(lastUserMessage || ''), baseSystem);
-    const msg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
+    const aiNow = new Date().toISOString();
+    const msg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+    // persist and compute response time
+    const arr = messengerStore.messages.get(conversationId) || [];
+    arr.push(msg);
+    messengerStore.messages.set(conversationId, arr);
+    const conv = messengerStore.conversations.get(conversationId);
+    if (conv) { conv.lastMessage = reply; conv.timestamp = aiNow; messengerStore.conversations.set(conversationId, conv); }
+    const lastTs = lastCustomerAtByConversation.get(conversationId);
+    if (typeof lastTs === 'number') {
+      const rt = new Date(aiNow).getTime() - lastTs;
+      const list = messengerStore.responseTimes.get(conversationId) || [];
+      list.push(rt);
+      messengerStore.responseTimes.set(conversationId, list);
+      lastCustomerAtByConversation.delete(conversationId);
+    }
+    saveMessengerStore();
     io.emit('messenger:message_created', { conversationId, message: msg });
     return res.json({ success: true, message: msg });
   } catch (err) {
@@ -1023,15 +1045,20 @@ app.post('/api/messenger/send-message', async (req, res) => {
       io.emit('messenger:message_created', { conversationId, message: msg });
       return res.json({ success: true, message: msg });
     }
-    const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
+    const nowIso = new Date().toISOString();
+    const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: nowIso };
     const arr = messengerStore.messages.get(conversationId) || [];
     arr.push(msg);
     messengerStore.messages.set(conversationId, arr);
     const conv = messengerStore.conversations.get(conversationId);
     if (conv) {
       conv.lastMessage = text;
-      conv.timestamp = new Date().toISOString();
+      conv.timestamp = nowIso;
       messengerStore.conversations.set(conversationId, conv);
+    }
+    // if customer, start response timer
+    if (senderNorm === 'customer') {
+      lastCustomerAtByConversation.set(conversationId, new Date(nowIso).getTime());
     }
     saveMessengerStore();
     io.emit('messenger:message_created', { conversationId, message: msg });
@@ -1043,13 +1070,23 @@ app.post('/api/messenger/send-message', async (req, res) => {
         const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
         const replyText = await generateWithGemini(String(text || ''), baseSystem);
         if (replyText) {
-          const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: replyText, timestamp: new Date().toISOString(), isRead: true };
+          const aiNow = new Date().toISOString();
+          const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: replyText, timestamp: aiNow, isRead: true };
           arr.push(aiMsg);
           messengerStore.messages.set(conversationId, arr);
           if (conv) {
             conv.lastMessage = replyText;
-            conv.timestamp = new Date().toISOString();
+            conv.timestamp = aiNow;
             messengerStore.conversations.set(conversationId, conv);
+          }
+          // compute response time if prior customer timestamp exists
+          const lastTs = lastCustomerAtByConversation.get(conversationId);
+          if (typeof lastTs === 'number') {
+            const rt = new Date(aiNow).getTime() - lastTs;
+            const list = messengerStore.responseTimes.get(conversationId) || [];
+            list.push(rt);
+            messengerStore.responseTimes.set(conversationId, list);
+            lastCustomerAtByConversation.delete(conversationId);
           }
           saveMessengerStore();
           io.emit('messenger:message_created', { conversationId, message: aiMsg });
@@ -1165,6 +1202,13 @@ app.get('/api/analytics', (_req, res) => {
     const avgResponseTimeSeconds = responded ? Math.round(totalRespTime / responded / 1000) : 0;
     const aiReplyRate = totalMessages ? (aiReplies / totalMessages) : 0;
 
+    // Compute global average AI response time from persisted responseTimes
+    let totalRt = 0, countRt = 0;
+    for (const list of messengerStore.responseTimes.values()) {
+      for (const rt of (list || [])) { totalRt += rt; countRt += 1; }
+    }
+    const persistedAvgAiSeconds = countRt ? Math.round(totalRt / countRt / 1000) : avgResponseTimeSeconds;
+
     // Time series last 30 days
     const days = 30;
     const labels = [];
@@ -1265,7 +1309,7 @@ app.get('/api/analytics', (_req, res) => {
       summary: {
         totalMessages,
         responseRate,
-        avgResponseTimeSeconds,
+        avgResponseTimeSeconds: persistedAvgAiSeconds,
         aiReplyRate,
       },
       workflowPerformance,
@@ -1305,13 +1349,16 @@ app.post('/webhook', async (req, res) => {
               io.emit('messenger:conversation_created', conv);
             }
             const text = (m.text && m.text.body) || (m.type === 'button' && m.button && m.button.text) || '';
-            const msg = { id: m.id || ('wa_' + Date.now()), sender: 'customer', text, timestamp: new Date().toISOString(), isRead: true };
+            const nowIso = new Date().toISOString();
+            const msg = { id: m.id || ('wa_' + Date.now()), sender: 'customer', text, timestamp: nowIso, isRead: true };
             const arr = messengerStore.messages.get(convId) || [];
             arr.push(msg);
             messengerStore.messages.set(convId, arr);
             conv.lastMessage = text;
-            conv.timestamp = new Date().toISOString();
+            conv.timestamp = nowIso;
             messengerStore.conversations.set(convId, conv);
+            // record last customer time for response measurement
+            lastCustomerAtByConversation.set(convId, new Date(nowIso).getTime());
             saveMessengerStore();
             io.emit('messenger:message_created', { conversationId: convId, message: msg });
 
@@ -1330,12 +1377,22 @@ app.post('/webhook', async (req, res) => {
                     text: { body: reply.slice(0, 900) }
                   }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
 
-                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true };
+                  const aiNow = new Date().toISOString();
+                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
                   arr.push(aiMsg);
                   messengerStore.messages.set(convId, arr);
                   conv.lastMessage = reply;
-                  conv.timestamp = new Date().toISOString();
+                  conv.timestamp = aiNow;
                   messengerStore.conversations.set(convId, conv);
+                  // compute response time if we have a last customer timestamp
+                  const lastTs = lastCustomerAtByConversation.get(convId);
+                  if (typeof lastTs === 'number') {
+                    const rt = new Date(aiNow).getTime() - lastTs;
+                    const list = messengerStore.responseTimes.get(convId) || [];
+                    list.push(rt);
+                    messengerStore.responseTimes.set(convId, list);
+                    lastCustomerAtByConversation.delete(convId);
+                  }
                   saveMessengerStore();
                   io.emit('messenger:message_created', { conversationId: convId, message: aiMsg });
                 }
@@ -1365,13 +1422,24 @@ app.post('/webhook', async (req, res) => {
             // Skip echoes of our own messages
             if (message.is_echo) continue;
             const text = message.text || (message.attachments && '[attachment]') || '';
+            const nowIso = new Date().toISOString();
+            // Persist incoming FB message to store so analytics are real
+            const arr0 = messengerStore.messages.get(threadId) || [];
+            arr0.push({ id: 'fb_' + Date.now(), sender: 'customer', text, timestamp: nowIso, isRead: true });
+            messengerStore.messages.set(threadId, arr0);
+            const conv0 = messengerStore.conversations.get(threadId) || { id: threadId, name: `FB:${senderId}`, profilePic: '', lastMessage: '', timestamp: nowIso, unreadCount: 0 };
+            conv0.lastMessage = text;
+            conv0.timestamp = nowIso;
+            messengerStore.conversations.set(threadId, conv0);
+            lastCustomerAtByConversation.set(threadId, new Date(nowIso).getTime());
+            saveMessengerStore();
             io.emit('messenger:message_created', {
               conversationId: threadId,
               message: {
                 id: 'fb_' + Date.now(),
                 sender: 'customer',
                 text,
-                timestamp: new Date().toISOString(),
+                timestamp: nowIso,
                 isRead: true,
               }
             });
@@ -1387,11 +1455,27 @@ app.post('/webhook', async (req, res) => {
                     recipient: { id: senderId },
                     message: { text: reply.slice(0, 900) }
                   }, { params: { access_token: config.facebook.pageToken } });
+                  const aiNow = new Date().toISOString();
+                  // Persist AI reply for FB, compute response time
+                  const arr1 = messengerStore.messages.get(threadId) || [];
+                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+                  arr1.push(aiMsg);
+                  messengerStore.messages.set(threadId, arr1);
+                  const conv1 = messengerStore.conversations.get(threadId) || { id: threadId, name: `FB:${senderId}`, profilePic: '', lastMessage: '', timestamp: aiNow, unreadCount: 0 };
+                  conv1.lastMessage = reply;
+                  conv1.timestamp = aiNow;
+                  messengerStore.conversations.set(threadId, conv1);
+                  const lastTs = lastCustomerAtByConversation.get(threadId);
+                  if (typeof lastTs === 'number') {
+                    const rt = new Date(aiNow).getTime() - lastTs;
+                    const list = messengerStore.responseTimes.get(threadId) || [];
+                    list.push(rt);
+                    messengerStore.responseTimes.set(threadId, list);
+                    lastCustomerAtByConversation.delete(threadId);
+                  }
+                  saveMessengerStore();
                   // Emit to frontend
-                  io.emit('messenger:message_created', {
-                    conversationId: threadId,
-                    message: { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: new Date().toISOString(), isRead: true }
-                  });
+                  io.emit('messenger:message_created', { conversationId: threadId, message: aiMsg });
                 }
               } catch (aiErr) {
                 console.warn('Gemini auto-reply failed:', serializeError(aiErr));
