@@ -638,6 +638,8 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
     if (platform === 'facebook' && config.facebook.provider === 'facebook' && config.facebook.pageToken && config.facebook.pageId) {
       // Use provided conversationId or pick the latest page conversation
       let fbThreadId = (req.body && req.body.conversationId) || null;
+      // If a conversation is provided, also enable AI mode for it
+      if (fbThreadId) aiModeByConversation.set(fbThreadId, true);
       try {
         if (!fbThreadId) {
           const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,updated_time,participants.limit(10){id,name}', limit: 1 });
@@ -656,8 +658,8 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
           // Set system prompt for this thread
           messengerStore.systemPrompts.set(fbThreadId, buildSystemPromptFromCampaign(campaign));
           saveMessengerStore();
-          // Default AI mode OFF unless user explicitly turns it on later
-          aiModeByConversation.set(fbThreadId, false);
+          // Auto-enable AI mode for this campaign conversation
+          aiModeByConversation.set(fbThreadId, true);
 
           // Send initial message via Facebook
           const text = String(campaign?.message?.initialMessage || '').trim() || `Hi! This is ${campaign?.persona?.name || 'our team'} from ${makeCampaignNameFromDescription(campaign?.brief?.description || '')}. How can we help you today?`;
@@ -692,6 +694,8 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
       messengerStore.messages.set(convId, []);
       messengerStore.systemPrompts.set(convId, buildSystemPromptFromCampaign(campaign));
       saveMessengerStore();
+      // Auto-enable AI mode for this local campaign conversation
+      aiModeByConversation.set(convId, true);
       io.emit('messenger:conversation_created', conv);
       conversationId = convId;
     }
