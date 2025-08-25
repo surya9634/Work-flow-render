@@ -1286,6 +1286,25 @@ app.get('/api/analytics', (_req, res) => {
       datasets: [{ data: [aiReplies, 0, humanReplies], backgroundColor: ['rgb(59,130,246)','rgb(16,185,129)','rgb(245,158,11)'], borderWidth: 0 }]
     };
 
+    // Profile metrics
+    const sentMessages = flat.filter(m => m.sender === 'ai' || m.sender === 'agent').length;
+    // Leads: unique conversations where we responded to at least one customer message
+    const engagedConversations = new Set();
+    for (const [convId, arr] of byConv.entries()) {
+      for (let i = 0; i < arr.length; i++) {
+        const m = arr[i];
+        if (m.sender !== 'customer') continue;
+        let replied = false;
+        for (let j = i + 1; j < arr.length; j++) {
+          const n = arr[j];
+          if (n.sender === 'ai' || n.sender === 'agent') { replied = true; break; }
+        }
+        if (replied) { engagedConversations.add(convId); break; }
+      }
+    }
+    const leadsGenerated = engagedConversations.size;
+    const activeAutomations = Array.from((campaignsStore.campaigns || new Map()).values()).filter(c => c.status === 'active').length;
+
     // Activity feed: latest 20 events
     const latest = flat.sort((a,b)=>b.timestamp-a.timestamp).slice(0, 20).map(m => ({
       platform: m.platform,
@@ -1317,6 +1336,12 @@ app.get('/api/analytics', (_req, res) => {
       engagementRate,
       responseTypes,
       activityFeed: latest,
+      profile: {
+        totalMessagesSent: sentMessages,
+        activeAutomations,
+        leadsGenerated,
+        engagementRate: Math.round((responseRate || 0) * 1000) / 10 // as percentage with 1 decimal
+      }
     });
   } catch (e) {
     console.error('Analytics error:', serializeError(e));
