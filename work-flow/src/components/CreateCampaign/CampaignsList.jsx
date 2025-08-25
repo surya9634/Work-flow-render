@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Play, Pause, Eye, Instagram } from 'lucide-react';
+import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Play, Pause, Eye, Instagram, Facebook } from 'lucide-react';
+import { FaWhatsapp } from 'react-icons/fa';
 import { motion, AnimatePresence } from 'framer-motion';
 import CreateCampaignModal from './CreateCampaignModal';
 
@@ -11,10 +12,12 @@ const CampaignsList = () => {
   const [selectedCampaign, setSelectedCampaign] = useState(null);
 
   const handleCreateCampaign = (campaignData) => {
+    // After modal creates and starts the campaign via backend, we can refresh list from backend.
+    // For now, optimistically add a client-side item; it will be replaced on first refresh.
     const newCampaign = {
       id: Date.now(),
       name: extractCampaignName(campaignData.brief.description),
-      status: 'draft',
+      status: 'active',
       createdAt: new Date().toISOString(),
       channels: campaignData.brief.channels,
       targetAudience: campaignData.leads.targetAudience,
@@ -22,15 +25,9 @@ const CampaignsList = () => {
       message: campaignData.message,
       flow: campaignData.flow,
       files: campaignData.files,
-      stats: {
-        sent: 0,
-        delivered: 0,
-        opened: 0,
-        replied: 0
-      },
+      stats: { sent: 1, delivered: 1, opened: 0, replied: 0 },
       ...campaignData
     };
-    
     setCampaigns(prev => [newCampaign, ...prev]);
   };
 
@@ -76,13 +73,12 @@ const CampaignsList = () => {
   };
 
   const getChannelIcon = (channel) => {
-    const icons = {
-      whatsapp: WhatsApp,
-      instagram: Instagram,
-      
-      
+    const map = {
+      whatsapp: <FaWhatsapp className="w-5 h-5 text-green-500" />,
+      instagram: <Instagram className="w-5 h-5 text-pink-500" />,
+      facebook: <Facebook className="w-5 h-5 text-blue-600" />,
     };
-    return icons[channel] || '📱';
+    return map[channel] || '📱';
   };
 
   return (

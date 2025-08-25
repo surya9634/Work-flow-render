@@ -103,12 +103,29 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
     }
   };
 
-  const handleFinish = () => {
+  const handleFinish = async () => {
     const isValid = validateStep(currentStep);
     setStepValidation(prev => ({ ...prev, [currentStep]: isValid }));
     
     if (isValid) {
-      onSave(campaignData);
+      try {
+        // Create campaign in backend
+        const res = await fetch('/api/campaigns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(campaignData)
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.success) throw new Error(data?.message || 'create_failed');
+        const campId = data.campaign.id;
+        // Start campaign (creates conversation, sets system prompt, sends initial message)
+        const startRes = await fetch(`/api/campaigns/${campId}/start`, { method: 'POST' });
+        const startData = await startRes.json();
+        if (!startRes.ok || !startData?.success) throw new Error(startData?.message || 'start_failed');
+        onSave(data.campaign);
+      } catch (e) {
+        console.error('Campaign create/start failed:', e);
+      }
       onClose();
     }
   };

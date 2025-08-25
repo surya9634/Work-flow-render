@@ -554,6 +554,141 @@ if (config.facebook.provider !== 'facebook') {
   seedMessengerDataIfEmpty();
 }
 
+// --- Campaigns store with JSON persistence ---
+const campaignsFile = path.join(dataDir, 'campaigns.json');
+
+const campaignsStore = {
+  campaigns: new Map(), // id -> campaign
+};
+
+function loadCampaignsStore() {
+  const json = readJsonSafe(campaignsFile, { campaigns: [] });
+  campaignsStore.campaigns = new Map((json.campaigns || []).map(c => [c.id, c]));
+}
+
+function saveCampaignsStore() {
+  const campaigns = Array.from(campaignsStore.campaigns.values());
+  writeJsonSafe(campaignsFile, { campaigns });
+}
+
+loadCampaignsStore();
+
+function makeCampaignNameFromDescription(desc = '') {
+  const m = String(desc).match(/for\s+([\w-]+)/i);
+  const product = (m && m[1]) || 'Product';
+  return `${product} Awareness Campaign`;
+}
+
+function buildSystemPromptFromCampaign(c) {
+  const persona = c?.persona || {};
+  const brief = c?.brief || {};
+  const productMatch = String(brief.description || '').match(/for\s+([\w-]+)/i);
+  const product = (productMatch && productMatch[1]) || 'your product';
+  const tone = persona.tone ? `Tone: ${persona.tone}.` : '';
+  const notes = persona.notes ? ` Notes: ${persona.notes}.` : '';
+  return `You are ${persona.name || 'an assistant'}, a ${persona.position || 'sales assistant'} for ${product}. ${tone}${notes} Be concise, friendly, and helpful. If user asks about pricing or demo, guide them politely.`;
+}
+
+// Create campaign
+app.post('/api/campaigns', (req, res) => {
+  try {
+    const payload = req.body || {};
+    const id = 'camp_' + Date.now();
+    const campaign = {
+      id,
+      name: payload.name || makeCampaignNameFromDescription(payload?.brief?.description || ''),
+      status: 'draft',
+      createdAt: new Date().toISOString(),
+      brief: payload.brief || { description: '', channels: [] },
+      persona: payload.persona || { name: '', position: '', tone: '', notes: '' },
+      leads: payload.leads || { targetAudience: '', leadSource: '' },
+      message: payload.message || { initialMessage: '', hasOptOut: true, followUpMessage: '' },
+      flow: payload.flow || { objective: '', steps: [] },
+      files: payload.files || { links: [], attachments: [] },
+    };
+    campaignsStore.campaigns.set(id, campaign);
+    saveCampaignsStore();
+    return res.json({ success: true, campaign });
+  } catch (e) {
+    console.error('Create campaign error:', serializeError(e));
+    return res.status(500).json({ success: false, message: 'create_campaign_failed' });
+  }
+});
+
+// List campaigns
+app.get('/api/campaigns', (_req, res) => {
+  return res.json(Array.from(campaignsStore.campaigns.values()));
+});
+
+// Start campaign: create a conversation, set system prompt, send initial message
+app.post('/api/campaigns/:id/start', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const campaign = campaignsStore.campaigns.get(id);
+    if (!campaign) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+
+    const channels = campaign?.brief?.channels || [];
+    const platform = channels.includes('facebook') ? 'facebook' : (channels[0] || 'facebook');
+
+    // Build or find a conversation target
+    let conversationId = null;
+
+    if (platform === 'facebook' && config.facebook.provider === 'facebook' && config.facebook.pageToken && config.facebook.pageId) {
+      // Real FB requires an existing thread; if not provided, we start in local store as a fallback
+      // Fallback to local
+    }
+
+    // Local/simulated conversation
+    if (!conversationId) {
+      const convId = 'conv_' + Date.now();
+      const name = campaign?.persona?.name || 'Prospect';
+      const conv = {
+        id: convId,
+        name,
+        username: (name || 'prospect').toLowerCase().replace(/\s+/g, '.'),
+        profilePic: `https://unavatar.io/${encodeURIComponent(name)}`,
+        lastMessage: '',
+        timestamp: new Date().toISOString(),
+        unreadCount: 0,
+      };
+      messengerStore.conversations.set(convId, conv);
+      messengerStore.messages.set(convId, []);
+      messengerStore.systemPrompts.set(convId, buildSystemPromptFromCampaign(campaign));
+      saveMessengerStore();
+      io.emit('messenger:conversation_created', conv);
+      conversationId = convId;
+    }
+
+    // Send initial message (agent)
+    const initialText = String(campaign?.message?.initialMessage || '').trim() || `Hi! This is ${campaign?.persona?.name || 'our team'} from ${makeCampaignNameFromDescription(campaign?.brief?.description || '')}. How can we help you today?`;
+    const arr = messengerStore.messages.get(conversationId) || [];
+    const msg = { id: 'm_' + Date.now(), sender: 'agent', text: initialText, timestamp: new Date().toISOString(), isRead: true };
+    arr.push(msg);
+    messengerStore.messages.set(conversationId, arr);
+    const conv = messengerStore.conversations.get(conversationId);
+    if (conv) {
+      conv.lastMessage = initialText;
+      conv.timestamp = new Date().toISOString();
+      messengerStore.conversations.set(conversationId, conv);
+    }
+    saveMessengerStore();
+    io.emit('messenger:message_created', { conversationId, message: msg });
+
+    // Mark campaign active
+    campaign.status = 'active';
+    campaign.startedAt = new Date().toISOString();
+    campaign.platform = platform;
+    campaign.conversationId = conversationId;
+    campaignsStore.campaigns.set(id, campaign);
+    saveCampaignsStore();
+
+    return res.json({ success: true, campaign });
+  } catch (e) {
+    console.error('Start campaign error:', serializeError(e));
+    return res.status(500).json({ success: false, message: 'start_campaign_failed' });
+  }
+});
+
 // Facebook Messenger proxy helpers
 async function fbApiGet(pathSeg, params = {}) {
   const url = `https://graph.facebook.com/v21.0/${pathSeg}`;
