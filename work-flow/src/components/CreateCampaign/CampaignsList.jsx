@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Search, Filter, MoreVertical, Edit, Trash2, Play, Pause, Eye, Instagram, Facebook } from 'lucide-react';
 import { FaWhatsapp } from 'react-icons/fa';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -6,29 +6,33 @@ import CreateCampaignModal from './CreateCampaignModal';
 
 const CampaignsList = () => {
   const [campaigns, setCampaigns] = useState([]);
+
+  // Fetch campaigns from backend on mount
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/campaigns');
+        const data = await res.json();
+        if (!ignore && Array.isArray(data)) {
+          setCampaigns(data);
+        }
+      } catch (_) {}
+    })();
+    return () => { ignore = true; };
+  }, []);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedCampaign, setSelectedCampaign] = useState(null);
 
-  const handleCreateCampaign = (campaignData) => {
-    // After modal creates and starts the campaign via backend, we can refresh list from backend.
-    // For now, optimistically add a client-side item; it will be replaced on first refresh.
-    const newCampaign = {
-      id: Date.now(),
-      name: extractCampaignName(campaignData.brief.description),
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      channels: campaignData.brief.channels,
-      targetAudience: campaignData.leads.targetAudience,
-      persona: campaignData.persona,
-      message: campaignData.message,
-      flow: campaignData.flow,
-      files: campaignData.files,
-      stats: { sent: 1, delivered: 1, opened: 0, replied: 0 },
-      ...campaignData
-    };
-    setCampaigns(prev => [newCampaign, ...prev]);
+  const handleCreateCampaign = async (campaignData) => {
+    // Refresh from backend to get the real stored campaign list
+    try {
+      const res = await fetch('/api/campaigns');
+      const data = await res.json();
+      if (Array.isArray(data)) setCampaigns(data);
+    } catch (_) {}
   };
 
   const extractCampaignName = (description) => {
@@ -47,12 +51,24 @@ const CampaignsList = () => {
     setCampaigns(prev => prev.filter(c => c.id !== campaignId));
   };
 
-  const handleToggleCampaignStatus = (campaignId) => {
-    setCampaigns(prev => prev.map(campaign => 
-      campaign.id === campaignId 
-        ? { ...campaign, status: campaign.status === 'active' ? 'paused' : 'active' }
-        : campaign
-    ));
+  const handleToggleCampaignStatus = async (campaignId) => {
+    try {
+      const camp = campaigns.find(c => c.id === campaignId);
+      if (!camp) return;
+      if (camp.status === 'active') {
+        const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/stop`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data?.success) {
+          setCampaigns(prev => prev.map(c => c.id === campaignId ? data.campaign : c));
+        }
+      } else {
+        const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: camp.conversationId || null }) });
+        const data = await res.json();
+        if (res.ok && data?.success) {
+          setCampaigns(prev => prev.map(c => c.id === campaignId ? data.campaign : c));
+        }
+      }
+    } catch (_) {}
   };
 
   const filteredCampaigns = campaigns.filter(campaign => {
