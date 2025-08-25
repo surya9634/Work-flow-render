@@ -113,6 +113,10 @@ const MessengerChat = () => {
         if (ignore) return;
         const arr = Array.isArray(data) ? data : (data.messages || []);
         let sysPrompt = Array.isArray(data) ? '' : (data.systemPrompt || '');
+        const aiEnabled = Array.isArray(data) ? false : Boolean(data.aiMode);
+        if (aiEnabled) {
+          setAiMode(prev => ({ ...prev, [convId]: true }));
+        }
         // Fallback: read from localStorage if backend didn't provide it
         if (!sysPrompt) {
           try { sysPrompt = localStorage.getItem(`wf_sys_prompt_${convId}`) || ''; } catch {}
@@ -266,28 +270,26 @@ const MessengerChat = () => {
   };
 
   // Toggle AI Mode for current contact
-  const toggleAiMode = () => {
+  const toggleAiMode = async () => {
     if (!selectedContact) return;
-    
     const contactId = selectedContact.id;
     const newAiMode = !aiMode[contactId];
-    
-    setAiMode(prev => ({
-      ...prev,
-      [contactId]: newAiMode
-    }));
+
+    // Optimistic UI update
+    setAiMode(prev => ({ ...prev, [contactId]: newAiMode }));
+
+    try {
+      await fetch(`${API_BASE}/api/messenger/ai-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: contactId, enabled: newAiMode })
+      });
+    } catch (_) {}
 
     if (newAiMode) {
-      // Auto-assign to "Me" when AI mode is enabled
-      setAssignments(prev => ({
-        ...prev,
-        [contactId]: 'Me'
-      }));
-      
-      // Start client message simulation
+      setAssignments(prev => ({ ...prev, [contactId]: 'Me' }));
       startClientSimulation(contactId);
     } else {
-      // Stop simulation when AI mode is disabled
       stopClientSimulation(contactId);
     }
   };

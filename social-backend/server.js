@@ -235,6 +235,8 @@ const configurations = new Map(); // key: userId -> { postId, keyword, response 
 const tokenExpirations = new Map(); // key: userId -> timestamp
 // Map conversation thread id -> participant PSID for Facebook provider
 const fbConvParticipants = new Map();
+// Per-conversation AI mode switch (true = allow auto-replies)
+const aiModeByConversation = new Map();
 let frontendSocket = null;
 
 io.on('connection', (socket) => {
@@ -710,7 +712,7 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
     // If running locally (not FB/WA thread), simulate a customer message to kick off AI
     try {
       const isLocalConv = !String(conversationId).startsWith('wa_') && config.facebook.provider !== 'facebook';
-      if (isLocalConv && config.ai.geminiKey && config.ai.autoReplyWebhook) {
+      if (isLocalConv && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
         const customerText = campaign?.flow?.objective
           ? `Hi, I want to know more about ${campaign.flow.objective}.`
           : 'Hi, can you tell me more?';
@@ -861,7 +863,8 @@ app.get('/api/messenger/messages', async (req, res) => {
     }
     const msgs = messengerStore.messages.get(conversationId) || [];
     const systemPrompt = messengerStore.systemPrompts.get(conversationId) || '';
-    return res.json({ messages: msgs, systemPrompt });
+    const aiEnabled = aiModeByConversation.get(conversationId) === true;
+    return res.json({ messages: msgs, systemPrompt, aiMode: aiEnabled });
   } catch (err) {
     console.error('FB messages error:', serializeError(err));
     return res.status(500).json({ error: 'Error fetching messages' });
@@ -885,6 +888,7 @@ app.post('/api/messenger/conversations', (req, res) => {
   messengerStore.conversations.set(id, conv);
   messengerStore.messages.set(id, []);
   messengerStore.systemPrompts.set(id, '');
+  aiModeByConversation.set(id, false); // default OFF until user enables
   saveMessengerStore();
   io.emit('messenger:conversation_created', conv);
   return res.json({ success: true, conversation: conv });
@@ -917,6 +921,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
     if (typeof systemPrompt === 'string') {
       messengerStore.systemPrompts.set(conversationId, systemPrompt);
       saveMessengerStore();
+      if (!aiModeByConversation.has(conversationId)) aiModeByConversation.set(conversationId, false);
     }
 
     // WhatsApp outbound via Cloud API
@@ -974,7 +979,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
     io.emit('messenger:message_created', { conversationId, message: msg });
 
     // Auto-reply for local provider when customer sends a message
-    if ((senderNorm === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook) {
+    if ((senderNorm === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
       try {
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
         const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
@@ -1237,6 +1242,21 @@ app.post('/api/messenger/system-prompt', (req, res) => {
   } catch (err) {
     console.error('Save system prompt error:', serializeError(err));
     return res.status(500).json({ error: 'save_system_prompt_failed' });
+  }
+});
+
+// Toggle AI mode for a conversation (persisted in-memory)
+app.post('/api/messenger/ai-mode', (req, res) => {
+  try {
+    const { conversationId, enabled } = req.body || {};
+    if (!conversationId || typeof enabled !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'conversationId and enabled(boolean) required' });
+    }
+    aiModeByConversation.set(conversationId, enabled);
+    return res.json({ success: true, conversationId, enabled });
+  } catch (err) {
+    console.error('Toggle AI mode error:', serializeError(err));
+    return res.status(500).json({ success: false, message: 'toggle_failed' });
   }
 });
 
