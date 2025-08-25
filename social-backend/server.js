@@ -1113,6 +1113,173 @@ async function findThreadIdByPsid(psid) {
   }
 }
 
+// --- Analytics API ---
+app.get('/api/analytics', (_req, res) => {
+  try {
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const messagesMap = messengerStore.messages || new Map();
+    const allConvs = messengerStore.conversations || new Map();
+
+    // Flatten messages with conversationId and platform guess
+    const flat = [];
+    const fbIds = new Set(Array.from(fbConvParticipants.keys()));
+    for (const [convId, msgs] of messagesMap.entries()) {
+      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (fbIds.has(convId) ? 'Messenger' : 'Messenger');
+      for (const m of msgs || []) {
+        flat.push({ conversationId: convId, platform, sender: m.sender, timestamp: new Date(m.timestamp).getTime() });
+      }
+    }
+
+    // Summary metrics
+    const totalMessages = flat.length;
+    const aiReplies = flat.filter(m => m.sender === 'ai').length;
+    const humanReplies = flat.filter(m => m.sender === 'agent').length;
+    const customerMsgs = flat.filter(m => m.sender === 'customer').sort((a,b) => a.timestamp - b.timestamp);
+
+    let responded = 0;
+    let totalRespTime = 0;
+    // Compute response time per conversation: next reply after a customer message
+    const byConv = new Map();
+    for (const m of flat.sort((a,b)=>a.timestamp-b.timestamp)) {
+      if (!byConv.has(m.conversationId)) byConv.set(m.conversationId, []);
+      byConv.get(m.conversationId).push(m);
+    }
+    for (const arr of byConv.values()) {
+      for (let i = 0; i < arr.length; i++) {
+        const m = arr[i];
+        if (m.sender !== 'customer') continue;
+        // find next reply
+        let reply = null;
+        for (let j = i + 1; j < arr.length; j++) {
+          const n = arr[j];
+          if (n.sender === 'ai' || n.sender === 'agent') { reply = n; break; }
+        }
+        if (reply) {
+          responded += 1;
+          totalRespTime += Math.max(0, reply.timestamp - m.timestamp);
+        }
+      }
+    }
+    const responseRate = customerMsgs.length ? responded / customerMsgs.length : 0;
+    const avgResponseTimeSeconds = responded ? Math.round(totalRespTime / responded / 1000) : 0;
+    const aiReplyRate = totalMessages ? (aiReplies / totalMessages) : 0;
+
+    // Time series last 30 days
+    const days = 30;
+    const labels = [];
+    const processed = new Array(days).fill(0);
+    const aiSeries = new Array(days).fill(0);
+    for (let d = days - 1; d >= 0; d--) {
+      const dayStart = new Date(now - d * dayMs);
+      labels.push(`${dayStart.getMonth() + 1}/${dayStart.getDate()}`);
+    }
+    for (const m of flat) {
+      const offset = Math.floor((now - m.timestamp) / dayMs);
+      if (offset >= 0 && offset < days) {
+        const idx = days - 1 - offset;
+        processed[idx] += 1;
+        if (m.sender === 'ai') aiSeries[idx] += 1;
+      }
+    }
+    const workflowPerformance = {
+      labels,
+      datasets: [
+        { label: 'Messages Processed', data: processed, borderColor: 'rgb(59, 130, 246)', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4 },
+        { label: 'AI Responses', data: aiSeries, borderColor: 'rgb(16, 185, 129)', backgroundColor: 'rgba(16, 185, 129, 0.1)', tension: 0.4 },
+      ]
+    };
+
+    // Platform Distribution
+    const platCounts = { Instagram: 0, WhatsApp: 0, Messenger: 0 };
+    for (const m of flat) platCounts[m.platform] = (platCounts[m.platform] || 0) + 1;
+    const platformDistribution = {
+      labels: Object.keys(platCounts),
+      datasets: [{ data: Object.values(platCounts), backgroundColor: ['rgb(236,72,153)','rgb(34,197,94)','rgb(59,130,246)'], borderWidth: 0 }]
+    };
+
+    // Engagement by platform (last 4 weeks response rate)
+    const weeks = 4;
+    const weekMs = 7 * dayMs;
+    const weekLabels = ['Week 1','Week 2','Week 3','Week 4'];
+    const platforms = ['Instagram','WhatsApp','Messenger'];
+    const perPlatRates = Object.fromEntries(platforms.map(p => [p, new Array(weeks).fill(0)]));
+    const perPlatCounts = Object.fromEntries(platforms.map(p => [p, new Array(weeks).fill(0)]));
+    for (const [convId, arr] of byConv.entries()) {
+      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (fbIds.has(convId) ? 'Messenger' : 'Messenger');
+      for (let i = 0; i < arr.length; i++) {
+        const m = arr[i];
+        if (m.sender !== 'customer') continue;
+        let reply = null;
+        for (let j = i + 1; j < arr.length; j++) {
+          const n = arr[j];
+          if (n.sender === 'ai' || n.sender === 'agent') { reply = n; break; }
+        }
+        const bucket = Math.min(weeks - 1, Math.max(0, Math.floor((now - m.timestamp) / weekMs)));
+        perPlatCounts[platform][bucket] += 1;
+        if (reply) perPlatRates[platform][bucket] += 1;
+      }
+    }
+    const engagementRate = {
+      labels: weekLabels,
+      datasets: platforms.map((p, i) => ({
+        label: p,
+        data: perPlatCounts[p].map((c, idx) => c ? Math.round((perPlatRates[p][idx] / c) * 100) : 0),
+        borderColor: ['rgb(236,72,153)','rgb(34,197,94)','rgb(59,130,246)'][i],
+        backgroundColor: [
+          'rgba(236,72,153,0.2)',
+          'rgba(34,197,94,0.2)',
+          'rgba(59,130,246,0.2)'
+        ][i],
+        fill: true,
+        tension: 0.4,
+      }))
+    };
+
+    // Response types
+    const responseTypes = {
+      labels: ['Auto Reply', 'Smart Reply', 'Human Reply'],
+      datasets: [{ data: [aiReplies, 0, humanReplies], backgroundColor: ['rgb(59,130,246)','rgb(16,185,129)','rgb(245,158,11)'], borderWidth: 0 }]
+    };
+
+    // Activity feed: latest 20 events
+    const latest = flat.sort((a,b)=>b.timestamp-a.timestamp).slice(0, 20).map(m => ({
+      platform: m.platform,
+      action: m.sender === 'customer' ? 'Customer message' : (m.sender === 'ai' ? 'AI replied' : 'Agent replied'),
+      time: relativeTime(now - m.timestamp),
+      status: m.sender === 'ai' ? 'success' : (m.sender === 'agent' ? 'escalated' : 'success')
+    }));
+
+    function relativeTime(diff) {
+      const s = Math.floor(diff/1000);
+      if (s < 60) return `${s}s ago`;
+      const m = Math.floor(s/60);
+      if (m < 60) return `${m} minutes ago`;
+      const h = Math.floor(m/60);
+      if (h < 24) return `${h} hours ago`;
+      const d = Math.floor(h/24);
+      return `${d} days ago`;
+    }
+
+    return res.json({
+      summary: {
+        totalMessages,
+        responseRate,
+        avgResponseTimeSeconds,
+        aiReplyRate,
+      },
+      workflowPerformance,
+      platformDistribution,
+      engagementRate,
+      responseTypes,
+      activityFeed: latest,
+    });
+  } catch (e) {
+    console.error('Analytics error:', serializeError(e));
+    return res.status(500).json({ error: 'analytics_failed' });
+  }
+});
+
 app.post('/webhook', async (req, res) => {
   try {
     const body = req.body || {};
