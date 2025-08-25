@@ -58,7 +58,7 @@ const UserProfile = () => {
   // Load real metrics from backend and animate to them
   useEffect(() => {
     let ignore = false;
-    (async () => {
+    async function load() {
       try {
         const res = await fetch('/api/analytics');
         const data = await res.json();
@@ -91,17 +91,19 @@ const UserProfile = () => {
             }));
           }, 16);
         };
-        setTimeout(() => animateValue(0, target.totalMessages, 300, 'totalMessages'), 20);
-        setTimeout(() => animateValue(0, target.activeAutomations, 300, 'activeAutomations'), 20);
-        setTimeout(() => animateValue(0, target.leadsGenerated, 300, 'leadsGenerated'), 40);
-        setTimeout(() => animateValue(0, target.engagementRate, 300, 'engagementRate'), 60);
+        setTimeout(() => animateValue(animatedMetrics.totalMessages, target.totalMessages, 200, 'totalMessages'), 20);
+        setTimeout(() => animateValue(animatedMetrics.activeAutomations, target.activeAutomations, 200, 'activeAutomations'), 20);
+        setTimeout(() => animateValue(animatedMetrics.leadsGenerated, target.leadsGenerated, 200, 'leadsGenerated'), 40);
+        setTimeout(() => animateValue(animatedMetrics.engagementRate, target.engagementRate, 200, 'engagementRate'), 60);
       } catch (e) {
         // fallback: keep zeros
       } finally {
         if (!ignore) setLoading(false);
       }
-    })();
-    return () => { ignore = true; };
+    }
+    load();
+    const id = setInterval(() => { load(); }, 3000);
+    return () => { ignore = true; clearInterval(id); };
   }, []);
 
   const showNotification = (message) => {

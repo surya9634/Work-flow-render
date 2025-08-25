@@ -1017,7 +1017,19 @@ app.post('/api/messenger/send-message', async (req, res) => {
       } catch (waSendErr) {
         console.error('WA outbound send error:', serializeError(waSendErr));
       }
-      const msg = { id: 'wa_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
+      const nowIso = new Date().toISOString();
+      const msg = { id: 'wa_' + Date.now(), sender: senderNorm, text, timestamp: nowIso };
+      // persist
+      const arr = messengerStore.messages.get(conversationId) || [];
+      arr.push(msg);
+      messengerStore.messages.set(conversationId, arr);
+      const conv = messengerStore.conversations.get(conversationId);
+      if (conv) {
+        conv.lastMessage = text;
+        conv.timestamp = nowIso;
+        messengerStore.conversations.set(conversationId, conv);
+      }
+      saveMessengerStore();
       io.emit('messenger:message_created', { conversationId, message: msg });
       return res.json({ success: true, message: msg });
     }
@@ -1041,7 +1053,19 @@ app.post('/api/messenger/send-message', async (req, res) => {
       if (!recipientId) return res.status(400).json({ error: 'Could not resolve participant PSID for conversation' });
       const url = `https://graph.facebook.com/v21.0/me/messages`;
       await axios.post(url, { recipient: { id: recipientId }, message: { text } }, { params: { access_token: config.facebook.pageToken } });
-      const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: new Date().toISOString() };
+      const nowIso = new Date().toISOString();
+      const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: nowIso };
+      // persist
+      const arr = messengerStore.messages.get(conversationId) || [];
+      arr.push(msg);
+      messengerStore.messages.set(conversationId, arr);
+      const conv = messengerStore.conversations.get(conversationId);
+      if (conv) {
+        conv.lastMessage = text;
+        conv.timestamp = nowIso;
+        messengerStore.conversations.set(conversationId, conv);
+      }
+      saveMessengerStore();
       io.emit('messenger:message_created', { conversationId, message: msg });
       return res.json({ success: true, message: msg });
     }

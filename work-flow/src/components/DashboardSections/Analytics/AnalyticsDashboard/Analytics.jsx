@@ -11,7 +11,7 @@ const Analytics = () => {
 
   useEffect(() => {
     let ignore = false;
-    (async () => {
+    async function load() {
       try {
         const res = await fetch('/api/analytics');
         const json = await res.json();
@@ -21,8 +21,12 @@ const Analytics = () => {
       } finally {
         if (!ignore) setLoading(false);
       }
-    })();
-    return () => { ignore = true; };
+    }
+    load();
+
+    // Live updates via SSE fallback using polling (simple, no sockets)
+    const id = setInterval(() => { load(); }, 3000);
+    return () => { ignore = true; clearInterval(id); };
   }, []);
 
   const summary = data?.summary;
