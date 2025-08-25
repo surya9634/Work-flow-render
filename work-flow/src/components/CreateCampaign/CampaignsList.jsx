@@ -72,9 +72,11 @@ const CampaignsList = () => {
   };
 
   const filteredCampaigns = campaigns.filter(campaign => {
-    const matchesSearch = campaign.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         campaign.targetAudience.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || campaign.status === filterStatus;
+    const name = (campaign?.name || '').toLowerCase();
+    const audience = (campaign?.targetAudience || campaign?.leads?.targetAudience || '').toLowerCase();
+    const matchesSearch = name.includes(searchTerm.toLowerCase()) || audience.includes(searchTerm.toLowerCase());
+    const status = campaign?.status || 'active';
+    const matchesFilter = filterStatus === 'all' || status === filterStatus;
     return matchesSearch && matchesFilter;
   });
 
@@ -95,6 +97,13 @@ const CampaignsList = () => {
       facebook: <Facebook className="w-5 h-5 text-blue-600" />,
     };
     return map[channel] || '📱';
+  };
+
+  const getCampaignChannels = (campaign) => {
+    // Prefer flat channels; fallback to campaign.brief.channels
+    return Array.isArray(campaign?.channels) && campaign.channels.length > 0
+      ? campaign.channels
+      : (Array.isArray(campaign?.brief?.channels) ? campaign.brief.channels : []);
   };
 
   return (
@@ -201,13 +210,13 @@ const CampaignsList = () => {
                 <div className="space-y-3 mb-4">
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Target Audience</p>
-                    <p className="text-sm font-medium text-gray-900">{campaign.targetAudience}</p>
+                    <p className="text-sm font-medium text-gray-900">{campaign?.targetAudience || campaign?.leads?.targetAudience || '—'}</p>
                   </div>
                   
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Channels</p>
                     <div className="flex space-x-1">
-                      {campaign.channels.map((channel) => (
+                      {getCampaignChannels(campaign).map((channel) => (
                         <span key={channel} className="text-lg" title={channel}>
                           {getChannelIcon(channel)}
                         </span>
