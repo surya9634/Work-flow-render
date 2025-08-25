@@ -44,6 +44,8 @@ const UserProfile = () => {
     leadsGenerated: 0,
     engagementRate: 0
   });
+  const [loading, setLoading] = useState(true);
+  const [profileMetrics, setProfileMetrics] = useState({ totalMessagesSent: 0, activeAutomations: 0, leadsGenerated: 0, engagementRate: 0 });
 
   const [customAutomation, setCustomAutomation] = useState({
     name: '',
@@ -53,32 +55,53 @@ const UserProfile = () => {
     status: 'active'
   });
 
-  // Animated counter effect
+  // Load real metrics from backend and animate to them
   useEffect(() => {
-    const animateValue = (start, end, duration, key) => {
-      const range = end - start;
-      const increment = range / (duration / 16);
-      let current = start;
-      
-      const timer = setInterval(() => {
-        current += increment;
-        if (current >= end) {
-          current = end;
-          clearInterval(timer);
-        }
-        
-        setAnimatedMetrics(prev => ({
-          ...prev,
-          [key]: key === 'engagementRate' ? parseFloat(current.toFixed(1)) : Math.floor(current)
-        }));
-      }, 16);
-    };
-
-    // Start animations with staggered delays
-    setTimeout(() => animateValue(0, initialMetrics.totalMessages, 200, 'totalMessages'), 20);
-    setTimeout(() => animateValue(0, initialMetrics.activeAutomations, 200, 'activeAutomations'), 20);
-    setTimeout(() => animateValue(0, initialMetrics.leadsGenerated, 200, 'leadsGenerated'), 40);
-    setTimeout(() => animateValue(0, initialMetrics.engagementRate, 200, 'engagementRate'), 60);
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/analytics');
+        const data = await res.json();
+        if (ignore) return;
+        const p = data?.profile || {};
+        const target = {
+          totalMessages: Number(p.totalMessagesSent || 0),
+          activeAutomations: Number(p.activeAutomations || 0),
+          leadsGenerated: Number(p.leadsGenerated || 0),
+          engagementRate: Number(p.engagementRate || 0)
+        };
+        setProfileMetrics({
+          totalMessagesSent: target.totalMessages,
+          activeAutomations: target.activeAutomations,
+          leadsGenerated: target.leadsGenerated,
+          engagementRate: target.engagementRate
+        });
+        // animate to fetched values
+        const animateValue = (start, end, duration, key) => {
+          const range = end - start;
+          const increment = range / (duration / 16);
+          let current = start;
+          const timer = setInterval(() => {
+            current += increment;
+            const done = (range >= 0 ? current >= end : current <= end);
+            if (done) { current = end; clearInterval(timer); }
+            setAnimatedMetrics(prev => ({
+              ...prev,
+              [key]: key === 'engagementRate' ? parseFloat(current.toFixed(1)) : Math.floor(current)
+            }));
+          }, 16);
+        };
+        setTimeout(() => animateValue(0, target.totalMessages, 300, 'totalMessages'), 20);
+        setTimeout(() => animateValue(0, target.activeAutomations, 300, 'activeAutomations'), 20);
+        setTimeout(() => animateValue(0, target.leadsGenerated, 300, 'leadsGenerated'), 40);
+        setTimeout(() => animateValue(0, target.engagementRate, 300, 'engagementRate'), 60);
+      } catch (e) {
+        // fallback: keep zeros
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => { ignore = true; };
   }, []);
 
   const showNotification = (message) => {
@@ -183,7 +206,12 @@ const UserProfile = () => {
         {/* Metrics Cards */}
         <MetricsGrid
           animatedMetrics={animatedMetrics}
-          metrics={initialMetrics}
+          metrics={{
+            messageGrowth: 0,
+            automationGrowth: 0,
+            leadGrowth: 0,
+            engagementGrowth: 0
+          }}
           onRedirect={handleRedirect}
         />
 
