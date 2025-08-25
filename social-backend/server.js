@@ -622,12 +622,40 @@ app.get('/api/campaigns', (_req, res) => {
   return res.json(Array.from(campaignsStore.campaigns.values()));
 });
 
+// Stop campaign: pause AI for its conversation
+app.post('/api/campaigns/:id/stop', (req, res) => {
+  try {
+    const id = req.params.id;
+    const campaign = campaignsStore.campaigns.get(id);
+    if (!campaign) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+    if (campaign.conversationId) {
+      aiModeByConversation.set(campaign.conversationId, false);
+    }
+    campaign.status = 'paused';
+    campaignsStore.campaigns.set(id, campaign);
+    saveCampaignsStore();
+    return res.json({ success: true, campaign });
+  } catch (e) {
+    console.error('Stop campaign error:', serializeError(e));
+    return res.status(500).json({ success: false, message: 'stop_campaign_failed' });
+  }
+});
+
 // Start campaign: create a conversation, set system prompt, send initial message
 app.post('/api/campaigns/:id/start', async (req, res) => {
   try {
     const id = req.params.id;
     const campaign = campaignsStore.campaigns.get(id);
     if (!campaign) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+
+    // If campaign already has a conversation, just resume AI and set status active
+    if (campaign.conversationId) {
+      aiModeByConversation.set(campaign.conversationId, true);
+      campaign.status = 'active';
+      campaignsStore.campaigns.set(id, campaign);
+      saveCampaignsStore();
+      return res.json({ success: true, campaign });
+    }
 
     const channels = campaign?.brief?.channels || [];
     const platform = channels.includes('facebook') ? 'facebook' : (channels[0] || 'facebook');
@@ -907,6 +935,10 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
     const { conversationId, lastUserMessage, systemPrompt } = req.body || {};
     if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
     if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
+    // Respect AI mode switch: do not generate if disabled
+    if (aiModeByConversation.get(conversationId) !== true) {
+      return res.status(400).json({ error: 'ai_mode_disabled' });
+    }
     const stored = messengerStore.systemPrompts.get(conversationId) || '';
     const baseSystem = String(systemPrompt || stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
     const reply = await generateWithGemini(String(lastUserMessage || ''), baseSystem);
