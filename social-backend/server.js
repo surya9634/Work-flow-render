@@ -641,6 +641,24 @@ app.post('/api/campaigns/:id/stop', (req, res) => {
   }
 });
 
+// Delete campaign: disable AI and remove from store
+app.delete('/api/campaigns/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    const campaign = campaignsStore.campaigns.get(id);
+    if (!campaign) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+    if (campaign.conversationId) {
+      aiModeByConversation.set(campaign.conversationId, false);
+    }
+    campaignsStore.campaigns.delete(id);
+    saveCampaignsStore();
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('Delete campaign error:', serializeError(e));
+    return res.status(500).json({ success: false, message: 'delete_campaign_failed' });
+  }
+});
+
 // Start campaign: create a conversation, set system prompt, send initial message
 app.post('/api/campaigns/:id/start', async (req, res) => {
   try {

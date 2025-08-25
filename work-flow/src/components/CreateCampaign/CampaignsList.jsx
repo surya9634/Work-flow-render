@@ -47,8 +47,13 @@ const CampaignsList = () => {
     setIsModalOpen(true);
   };
 
-  const handleDeleteCampaign = (campaignId) => {
-    setCampaigns(prev => prev.filter(c => c.id !== campaignId));
+  const handleDeleteCampaign = async (campaignId) => {
+    try {
+      const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setCampaigns(prev => prev.filter(c => c.id !== campaignId));
+      }
+    } catch (_) {}
   };
 
   const handleToggleCampaignStatus = async (campaignId) => {
