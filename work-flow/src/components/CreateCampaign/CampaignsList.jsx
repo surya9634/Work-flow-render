@@ -193,7 +193,7 @@ const CampaignsList = () => {
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-gray-900 mb-1">
-                      {campaign.name}
+                      {campaign?.name || extractCampaignName(campaign?.brief?.description || '')}
                     </h3>
                     <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(campaign.status)}`}>
                       {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
@@ -227,7 +227,7 @@ const CampaignsList = () => {
                   <div>
                     <p className="text-sm text-gray-600 mb-1">Persona</p>
                     <p className="text-sm font-medium text-gray-900">
-                      {campaign.persona.name} • {campaign.persona.tone}
+                      {(campaign?.persona?.name || 'Persona')} • {(campaign?.persona?.tone || 'Neutral')}
                     </p>
                   </div>
                 </div>
@@ -235,11 +235,11 @@ const CampaignsList = () => {
                 {/* Campaign Stats */}
                 <div className="grid grid-cols-2 gap-4 mb-4 p-3 bg-gray-50 rounded-lg">
                   <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{campaign.stats.sent}</div>
+                    <div className="text-lg font-semibold text-gray-900">{(campaign?.stats?.sent ?? 0)}</div>
                     <div className="text-xs text-gray-600">Sent</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-lg font-semibold text-gray-900">{campaign.stats.replied}</div>
+                    <div className="text-lg font-semibold text-gray-900">{(campaign?.stats?.replied ?? 0)}</div>
                     <div className="text-xs text-gray-600">Replied</div>
                   </div>
                 </div>
@@ -285,7 +285,7 @@ const CampaignsList = () => {
                 {/* Created Date */}
                 <div className="mt-3 pt-3 border-t border-gray-100">
                   <p className="text-xs text-gray-500">
-                    Created {new Date(campaign.createdAt).toLocaleDateString()}
+                    Created {campaign?.createdAt ? new Date(campaign.createdAt).toLocaleDateString() : '—'}
                   </p>
                 </div>
               </motion.div>
