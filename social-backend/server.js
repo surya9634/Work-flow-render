@@ -402,10 +402,10 @@ app.get('/api/instagram/comments', async (req, res) => {
 app.post('/api/instagram/configure', async (req, res) => {
   try {
     const { userId, postId, keyword, response } = req.body;
-    if (!userId || !postId || !keyword || !response) return res.status(400).json({ error: 'Missing required fields' });
+    if (!userId || !postId || !response) return res.status(400).json({ error: 'Missing required fields' });
     const user = users.get(userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    configurations.set(userId, { postId, keyword, response });
+    configurations.set(userId, { postId, keyword: keyword || '', response });
     res.json({ success: true });
   } catch (err) {
     console.error('IG config error:', serializeError(err));
@@ -1144,7 +1144,7 @@ app.get('/webhook', (req, res) => {
 });
 
 // --- Webhook receiver (handles Instagram comments for automation) ---
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', async (req, res, next) => {
   try {
     const body = req.body || {};
     if (body.object === 'instagram' && Array.isArray(body.entry)) {
@@ -1183,8 +1183,8 @@ app.post('/webhook', async (req, res) => {
       }
       return res.sendStatus(200);
     }
-    // Non-IG payloads can be handled here if needed
-    return res.sendStatus(200);
+    // Not an Instagram webhook: pass to next handlers (e.g., WhatsApp)
+    return next();
   } catch (err) {
     console.error('Webhook POST error:', serializeError(err));
     return res.sendStatus(500);

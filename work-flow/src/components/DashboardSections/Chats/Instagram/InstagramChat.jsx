@@ -3,7 +3,7 @@ import ChatList from '../whatsapp/ChatList';
 import ChatWindow from '../whatsapp/ChatWindow';
 import ChatFilter from '../whatsapp/ChatFilter';
 import CustomerDetails from '../whatsapp/CustomerDetails';
-import { apiFetch } from '../../../lib/api';
+import { apiFetch } from '../../../../lib/api';
 
 // NOTE: This mirrors WhatsApp UI to keep consistent UX. Replace mock data with real IG DM data later.
 function InstagramChat() {
