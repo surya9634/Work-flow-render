@@ -22,6 +22,7 @@ const config = {
     appId: process.env.INSTAGRAM_APP_ID || '',
     appSecret: process.env.INSTAGRAM_APP_SECRET || '',
     redirectUri: process.env.INSTAGRAM_REDIRECT_URI || 'http://localhost:10000/auth/instagram/callback',
+    businessRedirectUri: process.env.INSTAGRAM_BUSINESS_REDIRECT_URI || (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/auth/instagram/business/callback` : 'http://localhost:10000/auth/instagram/business/callback'),
   },
   facebook: {
     appId: process.env.FACEBOOK_APP_ID || '',
@@ -290,13 +291,18 @@ async function refreshInstagramToken(userId) {
 
 
 
-// Instagram OAuth endpoints (note: real IG OAuth requires client-side flow; placeholder here)
-app.get('/auth/instagram', (_req, res) => {
-  res.status(501).send('Implement Instagram OAuth client-side. Configure INSTAGRAM_REDIRECT_URI and use the short-lived code to POST to /auth/instagram/callback?code=...');
+// Instagram OAuth endpoints (Business)
+app.get('/auth/instagram/business', (req, res) => {
+  try {
+    const authUrl = `https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=${encodeURIComponent(config.instagram.appId)}&redirect_uri=${encodeURIComponent(config.instagram.businessRedirectUri)}&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights`;
+    return res.redirect(authUrl);
+  } catch (e) {
+    return res.status(500).send('Failed to start Instagram Business OAuth');
+  }
 });
 
-// Exchange code -> token (server side)
-app.get('/auth/instagram/callback', async (req, res) => {
+// Exchange code -> token (server side, Business)
+app.get('/auth/instagram/business/callback', async (req, res) => {
   try {
     const { code } = req.query;
     if (!code) return res.redirect('/?error=missing_code');
