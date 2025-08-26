@@ -354,6 +354,60 @@ app.get('/auth/instagram/business/callback', async (req, res) => {
   }
 });
 
+// Instagram Basic callback (uses your exact redirect_uri)
+app.get('/auth/instagram/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) return res.redirect('/?error=missing_code');
+
+    const form = new URLSearchParams({
+      client_id: String(config.instagram.appId || ''),
+      client_secret: String(config.instagram.appSecret || ''),
+      grant_type: 'authorization_code',
+      redirect_uri: String(config.instagram.redirectUri || ''),
+      code: String(code || ''),
+    });
+
+    const tokenResponse = await axios.post(
+      'https://api.instagram.com/oauth/access_token',
+      form.toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      }
+    );
+
+    if (!tokenResponse.data?.access_token) {
+      throw new Error('Invalid token response: ' + JSON.stringify(tokenResponse.data));
+    }
+
+    const access_token = tokenResponse.data.access_token;
+    const user_id = String(tokenResponse.data.user_id);
+
+    const expirationTime = Date.now() + 60 * 24 * 60 * 60 * 1000;
+    tokenExpirations.set(user_id, expirationTime);
+
+    const profileResponse = await axios.get('https://graph.instagram.com/me', {
+      params: { fields: 'id,username,profile_picture_url', access_token },
+      headers: { 'X-IG-App-ID': config.instagram.appId },
+    });
+
+    const userData = {
+      access_token,
+      username: profileResponse.data.username,
+      profile_pic: profileResponse.data.profile_picture_url,
+      instagram_id: user_id,
+      last_login: new Date(),
+      platform: 'instagram',
+    };
+    users.set(user_id, userData);
+
+    res.redirect(`/instagram-dashboard?user_id=${user_id}`);
+  } catch (err) {
+    console.error('Instagram auth error:', serializeError(err));
+    res.redirect('/?error=instagram_auth_failed');
+  }
+});
+
 // Simple Instagram dashboard (static html)
 app.get('/instagram-dashboard', (req, res) => {
   res.send('<h2>Instagram Dashboard</h2><p>Use API endpoints to manage posts, comments, DM.</p>');
