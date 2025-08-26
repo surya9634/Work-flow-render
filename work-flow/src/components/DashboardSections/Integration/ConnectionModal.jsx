@@ -8,6 +8,8 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
   const [formData, setFormData] = useState({
     phoneNumber: '',
     apiKey: '',
+    phoneNumberId: '',
+    verifyToken: '',
     pageNames: [],
     username: '',
     followers: ''
@@ -19,6 +21,8 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
       setFormData({
         phoneNumber: editingConnection.phoneNumber || '',
         apiKey: editingConnection.apiKey || '',
+        phoneNumberId: editingConnection.phoneNumberId || '',
+        verifyToken: editingConnection.verifyToken || '',
         pageNames: editingConnection.pageNames || [],
         username: editingConnection.username || '',
         followers: editingConnection.followers || ''
@@ -28,20 +32,54 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
 
   const platformConfig = platforms[platform] || { name: platform || 'Platform', connectionTypes: [] };
 
+  // Prefill WhatsApp config when opening modal
+  useEffect(() => {
+    let ignore = false;
+    async function loadWhatsappConfig() {
+      if (platform !== 'whatsapp') return;
+      try {
+        const resp = await fetch(`${window.location.origin}/api/integrations/whatsapp/config`);
+        const data = await resp.json();
+        if (!resp.ok || !data?.success || ignore) return;
+        const w = data.whatsapp || {};
+        setFormData(prev => ({
+          ...prev,
+          phoneNumberId: w.phoneNumberId || prev.phoneNumberId,
+          // don't set token field with masked value; leave blank for security
+        }));
+      } catch {}
+    }
+    loadWhatsappConfig();
+    return () => { ignore = true; };
+  }, [platform]);
+
   const handleConnect = async () => {
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      if (platform === 'whatsapp' && connectionType === 'api') {
+        // Persist to backend so the server uses your API credentials immediately
+        const resp = await fetch(`${window.location.origin}/api/integrations/whatsapp/config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: formData.apiKey, phoneNumberId: formData.phoneNumberId, verifyToken: formData.verifyToken })
+        });
+        if (!resp.ok) throw new Error('Failed to save WhatsApp config');
+      }
+
       const connectionData = {
         platform,
         connectionType,
         ...formData
       };
-      
+
       onSave(connectionData);
+    } catch (e) {
+      console.error(e);
+      alert('Failed to connect. Please check your credentials.');
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
   };
 
   const renderConnectionForm = () => {
@@ -52,27 +90,41 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API Key
+                  Access Token
                 </label>
                 <input
                   type="text"
                   value={formData.apiKey}
                   onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Enter your WhatsApp Business API key"
+                  placeholder="Paste your WhatsApp Cloud API access token"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Phone Number
+                  Phone Number ID
                 </label>
                 <input
-                  type="tel"
-                  value={formData.phoneNumber}
-                  onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                  type="text"
+                  value={formData.phoneNumberId}
+                  onChange={(e) => setFormData({ ...formData, phoneNumberId: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="+1234567890"
+                  placeholder="e.g. 123456789012345"
                 />
+                <p className="text-xs text-gray-500 mt-1">Find this in Meta → WhatsApp → API Setup. Not your phone number.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Webhook Verify Token
+                </label>
+                <input
+                  type="text"
+                  value={formData.verifyToken}
+                  onChange={(e) => setFormData({ ...formData, verifyToken: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="your webhook verify token"
+                />
+                <p className="text-xs text-gray-500 mt-1">Use the same token when configuring the WhatsApp webhook subscription.</p>
               </div>
             </div>
           );

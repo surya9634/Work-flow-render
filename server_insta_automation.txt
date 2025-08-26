@@ -1,0 +1,42 @@
+import express from "express";
+import fetch from "node-fetch";
+
+const app = express();
+
+app.get("/auth/instagram/callback", async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.status(400).send("No code provided");
+
+  try {
+    // Step 1: Exchange code for access token
+    const tokenRes = await fetch("https://api.instagram.com/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.IG_CLIENT_ID,
+        client_secret: process.env.IG_CLIENT_SECRET,
+        grant_type: "authorization_code",
+        redirect_uri: "https://work-flow-render.onrender.com/auth/instagram/callback",
+        code
+      })
+    });
+
+    const data = await tokenRes.json();
+    console.log("Access Token Response:", data);
+
+    // Step 2: Exchange for long-lived token
+    const longTokenRes = await fetch(
+      `https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=${process.env.IG_CLIENT_SECRET}&access_token=${data.access_token}`
+    );
+
+    const longToken = await longTokenRes.json();
+    console.log("Long-lived token:", longToken);
+
+    res.json(longToken);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Auth failed");
+  }
+});
+
+app.listen(3000, () => console.log("🚀 Auth server running"));

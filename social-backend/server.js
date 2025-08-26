@@ -1127,7 +1127,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
   }
 });
 
-// --- Webhook verification (Facebook/WhatsApp share the same mechanism) ---
+// --- Webhook verification (Facebook/WhatsApp/Instagram share the same mechanism) ---
 app.get('/webhook', (req, res) => {
   try {
     const mode = req.query['hub.mode'];
@@ -1139,6 +1139,54 @@ app.get('/webhook', (req, res) => {
     return res.sendStatus(403);
   } catch (err) {
     console.error('Webhook verify error:', serializeError(err));
+    return res.sendStatus(500);
+  }
+});
+
+// --- Webhook receiver (handles Instagram comments for automation) ---
+app.post('/webhook', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.object === 'instagram' && Array.isArray(body.entry)) {
+      for (const entry of body.entry) {
+        const igUserId = String(entry.id || '');
+        const user = users.get(igUserId);
+        const cfg = configurations.get(igUserId);
+        if (!user || !cfg) continue; // not configured
+        const changes = Array.isArray(entry.changes) ? entry.changes : [];
+        for (const change of changes) {
+          const field = change.field || '';
+          const val = change.value || {};
+          if (field !== 'comments') continue;
+          const mediaId = String(val.media_id || '');
+          const text = String(val.text || '');
+          const username = val.username || '';
+          if (!mediaId || !username) continue;
+          // Match configured post and keyword
+          const keyword = String(cfg.keyword || '').toLowerCase();
+          if (String(cfg.postId) === mediaId && (!keyword || text.toLowerCase().includes(keyword))) {
+            try {
+              // Send IG DM via Graph API (requires proper IG messaging permissions)
+              await axios.post(`https://graph.facebook.com/v23.0/${user.instagram_id}/messages`, {
+                recipient: { username },
+                message: { text: String(cfg.response || 'Hi! How are you doing?') },
+              }, {
+                headers: { Authorization: `Bearer ${user.access_token}`, 'Content-Type': 'application/json' },
+                timeout: 15000,
+              });
+              console.log(`[IG Auto-DM] Sent to @${username} for media ${mediaId}`);
+            } catch (sendErr) {
+              console.warn('IG Auto-DM failed:', serializeError(sendErr));
+            }
+          }
+        }
+      }
+      return res.sendStatus(200);
+    }
+    // Non-IG payloads can be handled here if needed
+    return res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook POST error:', serializeError(err));
     return res.sendStatus(500);
   }
 });
@@ -1546,14 +1594,34 @@ app.post('/webhook', async (req, res) => {
 // Kick off subscription on startup (if configured)
 fbSubscribePageIfNeeded();
 
+// WhatsApp Cloud API config (runtime, from UI)
+app.get('/api/integrations/whatsapp/config', (_req, res) => {
+  try {
+    const hasToken = Boolean(config.whatsapp.token);
+    const tokenMasked = hasToken ? `${config.whatsapp.token.slice(0, 6)}...${config.whatsapp.token.slice(-4)}` : null;
+    return res.json({
+      success: true,
+      whatsapp: {
+        connected: !!(config.whatsapp.phoneNumberId && config.whatsapp.token),
+        phoneNumberId: config.whatsapp.phoneNumberId || '',
+        verifyTokenSet: Boolean(config.whatsapp.verifyToken),
+        tokenMasked,
+      }
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'internal_error' });
+  }
+});
+
 // Save WhatsApp credentials from UI (in-memory for runtime)
 app.post('/api/integrations/whatsapp/config', (req, res) => {
   try {
-    const { token, phoneNumberId } = req.body || {};
+    const { token, phoneNumberId, verifyToken } = req.body || {};
     if (!token || !phoneNumberId) return res.status(400).json({ success: false, message: 'token and phoneNumberId required' });
     config.whatsapp.token = String(token);
     config.whatsapp.phoneNumberId = String(phoneNumberId);
-    return res.json({ success: true, whatsapp: { connected: true, phoneNumberId: config.whatsapp.phoneNumberId } });
+    if (verifyToken) config.whatsapp.verifyToken = String(verifyToken);
+    return res.json({ success: true, whatsapp: { connected: true, phoneNumberId: config.whatsapp.phoneNumberId, verifyTokenSet: Boolean(config.whatsapp.verifyToken) } });
   } catch (e) {
     return res.status(500).json({ success: false, message: 'internal_error' });
   }

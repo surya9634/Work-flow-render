@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { MessageCircle, Phone, Instagram } from 'lucide-react';
 import MessengerChat from './MessengerChat/MessengerChat';
 import WhatsappChat from './whatsapp/WhatsappChat';
+import InstagramChat from './Instagram/InstagramChat';
 
 const Chats = () => {
   const [activeChat, setActiveChat] = useState('messenger');
@@ -23,14 +24,14 @@ const Chats = () => {
       hoverColor: 'hover:bg-green-600',
       description: 'WhatsApp business conversations'
     },
-    // {
-    //   id: 'instagram',
-    //   name: 'Instagram',
-    //   icon: Instagram,
-    //   color: 'bg-gradient-to-r from-purple-500 to-pink-500',
-    //   hoverColor: 'hover:from-purple-600 hover:to-pink-600',
-    //   description: 'Instagram Direct Messages'
-    // }
+    {
+      id: 'instagram',
+      name: 'Instagram',
+      icon: Instagram,
+      color: 'bg-gradient-to-r from-purple-500 to-pink-500',
+      hoverColor: 'hover:from-purple-600 hover:to-pink-600',
+      description: 'Instagram Direct Messages'
+    }
   ];
 
   const renderActiveChat = () => {
@@ -39,8 +40,8 @@ const Chats = () => {
         return <MessengerChat />;
       case 'whatsapp':
         return <WhatsappChat />;
-      // case 'instagram':
-      //   return <InstagramChat />;
+      case 'instagram':
+        return <InstagramChat />;
       default:
         return <MessengerChat />;
     }
