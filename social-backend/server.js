@@ -1202,6 +1202,37 @@ app.post('/api/messenger/send-message', async (req, res) => {
   }
 });
 
+// IG business ID cache and resolver
+let igBusinessIdCache = { id: null, fetchedAt: 0 };
+async function ensureIgBusinessId() {
+  try {
+    const now = Date.now();
+    if (igBusinessIdCache.id && (now - igBusinessIdCache.fetchedAt) < 10 * 60 * 1000) {
+      return igBusinessIdCache.id;
+    }
+    if (!config.facebook.pageId || !config.facebook.pageToken) {
+      console.warn('Missing FB_PAGE_ID or FB_PAGE_TOKEN; cannot resolve ig_business_account');
+      return null;
+    }
+    const resp = await axios.get(`https://graph.facebook.com/v23.0/${config.facebook.pageId}`, {
+      params: { fields: 'instagram_business_account{id,username}', access_token: config.facebook.pageToken },
+      timeout: 15000,
+    });
+    const ig = resp.data && resp.data.instagram_business_account;
+    const igId = ig && ig.id ? String(ig.id) : null;
+    if (igId) {
+      igBusinessIdCache = { id: igId, fetchedAt: now };
+      console.log('Resolved ig_business_account id:', igId);
+    } else {
+      console.warn('Could not resolve instagram_business_account from page');
+    }
+    return igId;
+  } catch (e) {
+    console.warn('ensureIgBusinessId error:', serializeError(e));
+    return null;
+  }
+}
+
 // --- Webhook verification (Facebook/WhatsApp/Instagram share the same mechanism) ---
 app.get('/webhook', (req, res) => {
   try {
@@ -1223,6 +1254,7 @@ app.post('/webhook', async (req, res, next) => {
   try {
     const body = req.body || {};
     if (body.object === 'instagram' && Array.isArray(body.entry)) {
+      console.log('IG webhook received:', JSON.stringify(body).slice(0, 500));
       for (const entry of body.entry) {
         const igUserId = String(entry.id || '');
         const user = users.get(igUserId);
@@ -1241,12 +1273,15 @@ app.post('/webhook', async (req, res, next) => {
           const keyword = String(cfg.keyword || '').toLowerCase();
           if (String(cfg.postId) === mediaId && (!keyword || text.toLowerCase().includes(keyword))) {
             try {
-              // Send IG DM via Graph API (requires proper IG messaging permissions)
-              await axios.post(`https://graph.facebook.com/v23.0/${user.instagram_id}/messages`, {
+              // Send IG DM via Graph API (requires Page token + ig_business_account)
+              const igBizId = await ensureIgBusinessId();
+              if (!igBizId) throw new Error('No ig_business_account id resolved');
+              await axios.post(`https://graph.facebook.com/v23.0/${igBizId}/messages`, {
                 recipient: { username },
                 message: { text: String(cfg.response || 'Hi! How are you doing?') },
               }, {
-                headers: { Authorization: `Bearer ${user.access_token}`, 'Content-Type': 'application/json' },
+                params: { access_token: config.facebook.pageToken },
+                headers: { 'Content-Type': 'application/json' },
                 timeout: 15000,
               });
               console.log(`[IG Auto-DM] Sent to @${username} for media ${mediaId}`);
