@@ -312,7 +312,7 @@ app.get('/auth/instagram/business/callback', async (req, res) => {
       client_id: config.instagram.appId,
       client_secret: config.instagram.appSecret,
       grant_type: 'authorization_code',
-      redirect_uri: config.instagram.redirectUri,
+      redirect_uri: config.instagram.businessRedirectUri,
       code: code,
     }), {
       headers: {
@@ -500,11 +500,15 @@ app.post('/api/instagram/send-dm', async (req, res) => {
       if (!newTok) return res.status(401).json({ error: 'Token expired. Reconnect IG.', code: 'TOKEN_REFRESH_FAILED' });
     }
 
-    const igResp = await axios.post(`https://graph.facebook.com/v23.0/${user.instagram_id}/messages`, {
+    // Send via IG Business account using Page token
+    const igBizId = await ensureIgBusinessId();
+    if (!igBizId) return res.status(500).json({ error: 'IG business account not resolved' });
+    const igResp = await axios.post(`https://graph.facebook.com/v23.0/${igBizId}/messages`, {
       recipient: { username },
       message: { text: message },
     }, {
-      headers: { Authorization: `Bearer ${user.access_token}`, 'Content-Type': 'application/json' },
+      params: { access_token: config.facebook.pageToken },
+      headers: { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
 
