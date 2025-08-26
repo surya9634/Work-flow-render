@@ -20,6 +20,18 @@ function InstagramChat() {
   const [aiMode, setAiMode] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(true);
 
+  // OAuth URL (provided)
+  const IG_OAUTH_URL = 'https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=1477959410285896&redirect_uri=https://work-flow-render.onrender.com/auth/instagram/callback&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights';
+
+  // Auto-capture user_id from redirect query if present
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('user_id');
+      if (id) setUserId(id);
+    } catch {}
+  }, []);
+
   // Automation states
   const [userId, setUserId] = useState(''); // supply ig user id from auth redirect or input
   const [posts, setPosts] = useState([]);
@@ -105,7 +117,12 @@ function InstagramChat() {
       <div className="w-96 border-r border-gray-200 flex flex-col h-full">
         {/* Automation Setup */}
         <div className="p-3 border-b border-gray-200 bg-gray-50">
-          <h3 className="text-sm font-semibold text-gray-700 mb-2">Instagram Automation</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-gray-700">Instagram Automation</h3>
+            <a href={IG_OAUTH_URL} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700" target="_blank" rel="noreferrer">
+              Connect Instagram
+            </a>
+          </div>
           <div className="space-y-2">
             <input
               className="w-full border rounded px-2 py-1 text-sm"
