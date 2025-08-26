@@ -360,17 +360,32 @@ app.get('/auth/instagram/callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.redirect('/?error=missing_code');
 
-    const form = new URLSearchParams({
-      client_id: String(config.instagram.appId || ''),
-      client_secret: String(config.instagram.appSecret || ''),
-      grant_type: 'authorization_code',
-      redirect_uri: String(config.instagram.redirectUri || ''),
-      code: String(code || ''),
+    // Validate required envs
+    if (!config.instagram.appId || !config.instagram.appSecret || !config.instagram.redirectUri) {
+      console.error('Instagram config missing:', {
+        hasAppId: !!config.instagram.appId,
+        hasAppSecret: !!config.instagram.appSecret,
+        redirectUri: config.instagram.redirectUri,
+      });
+      return res.redirect('/?error=instagram_config');
+    }
+
+    // Prepare form as application/x-www-form-urlencoded
+    const form = new URLSearchParams();
+    form.append('client_id', config.instagram.appId);
+    form.append('client_secret', config.instagram.appSecret);
+    form.append('grant_type', 'authorization_code');
+    form.append('redirect_uri', config.instagram.redirectUri);
+    form.append('code', String(code));
+
+    console.log('IG OAuth exchange:', {
+      hasClientId: !!config.instagram.appId,
+      redirectMatches: typeof config.instagram.redirectUri === 'string' && config.instagram.redirectUri.includes('/auth/instagram/callback'),
     });
 
     const tokenResponse = await axios.post(
       'https://api.instagram.com/oauth/access_token',
-      form.toString(),
+      form,
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       }
