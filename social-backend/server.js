@@ -488,6 +488,37 @@ app.post('/api/instagram/configure', async (req, res) => {
   }
 });
 
+// Resolve IG business account id from Page token; caches value in-memory
+async function ensureIgBusinessId() {
+  try {
+    // If already resolved and cached on config, reuse
+    if (config.facebook.igBusinessId) return config.facebook.igBusinessId;
+    if (!config.facebook.pageToken) return null;
+
+    // 1) Get Page ID if missing
+    if (!config.facebook.pageId) {
+      const mePages = await axios.get('https://graph.facebook.com/v21.0/me/accounts', {
+        params: { access_token: config.facebook.pageToken, fields: 'id,name' }
+      });
+      const first = mePages.data?.data?.[0];
+      if (!first?.id) return null;
+      config.facebook.pageId = first.id;
+    }
+
+    // 2) Get instagram_business_account from Page
+    const pageResp = await axios.get(`https://graph.facebook.com/v21.0/${config.facebook.pageId}`, {
+      params: { fields: 'instagram_business_account{id,username}', access_token: config.facebook.pageToken }
+    });
+    const igBiz = pageResp.data?.instagram_business_account?.id;
+    if (!igBiz) return null;
+    config.facebook.igBusinessId = igBiz;
+    return igBiz;
+  } catch (e) {
+    console.warn('ensureIgBusinessId error:', e?.response?.data || e.message);
+    return null;
+  }
+}
+
 app.post('/api/instagram/send-dm', async (req, res) => {
   try {
     const { userId, username, message } = req.body;
@@ -1335,6 +1366,47 @@ async function findThreadIdByPsid(psid) {
     return null;
   }
 }
+
+// --- Health: Instagram/FB config & connectivity ---
+app.get('/api/instagram/health', async (_req, res) => {
+  try {
+    const health = {
+      instagram: {
+        appIdSet: !!config.instagram.appId,
+        businessRedirectUri: config.instagram.businessRedirectUri,
+        basicRedirectUri: config.instagram.redirectUri,
+        businessCallbackOk: typeof config.instagram.businessRedirectUri === 'string' && config.instagram.businessRedirectUri.includes('/auth/instagram/business/callback')
+      },
+      facebook: {
+        pageIdSet: !!config.facebook.pageId,
+        pageTokenSet: !!config.facebook.pageToken,
+        igBusinessId: null
+      },
+      webhook: {
+        verifyTokenSet: !!config.webhook.verifyToken,
+        callbackUrl: (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/webhook` : 'http://localhost:10000/webhook')
+      },
+      notes: []
+    };
+
+    // Try resolve IG business account id
+    try {
+      const igBizId = await ensureIgBusinessId();
+      health.facebook.igBusinessId = igBizId || null;
+      if (!igBizId) health.notes.push('IG business account not resolved. Ensure IG is linked to a Facebook Page and FB_PAGE_TOKEN is set.');
+    } catch (e) {
+      health.notes.push('Error resolving ig_business_account: ' + (e?.message || 'unknown'));
+    }
+
+    if (!health.instagram.appIdSet) health.notes.push('Missing INSTAGRAM_APP_ID');
+    if (!health.facebook.pageTokenSet) health.notes.push('Missing FB_PAGE_TOKEN');
+    if (!health.webhook.verifyTokenSet) health.notes.push('Missing WEBHOOK_VERIFY_TOKEN');
+
+    return res.json({ ok: true, health });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
 
 // --- Analytics API ---
 app.get('/api/analytics', (_req, res) => {
