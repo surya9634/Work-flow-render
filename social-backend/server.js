@@ -692,6 +692,130 @@ function saveCampaignsStore() {
 
 loadCampaignsStore();
 
+// --- Sales store with JSON persistence ---
+const salesFile = path.join(dataDir, 'sales.json');
+const salesStore = {
+  orders: [], // [{id,date,product,quantity,amount,customer,status,source,convId}]
+  interests: [], // [{id,date,product,customer,convId,text,source}]
+  objections: [] // [{id,date,category,text,customer,product,convId,source}]
+};
+function loadSalesStore() {
+  const json = readJsonSafe(salesFile, { orders: [], interests: [], objections: [] });
+  salesStore.orders = Array.isArray(json.orders) ? json.orders : [];
+  salesStore.interests = Array.isArray(json.interests) ? json.interests : [];
+  salesStore.objections = Array.isArray(json.objections) ? json.objections : [];
+}
+function saveSalesStore() {
+  writeJsonSafe(salesFile, { orders: salesStore.orders, interests: salesStore.interests, objections: salesStore.objections });
+}
+loadSalesStore();
+
+// Sales API
+app.get('/api/sales/report', (_req, res) => {
+  try {
+    return res.json({ ok: true, data: salesStore.orders || [] });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'sales_report_failed' });
+  }
+});
+
+app.post('/api/sales/order', (req, res) => {
+  try {
+    const { product, quantity, amount, customer, status, convId, source } = req.body || {};
+    if (!product || !customer || typeof amount !== 'number') return res.status(400).json({ ok: false, error: 'missing_fields' });
+    const order = {
+      id: 'order_' + Date.now(),
+      date: new Date().toISOString().slice(0,10),
+      product: String(product),
+      quantity: Number(quantity || 1),
+      amount: Number(amount),
+      customer: String(customer),
+      status: String(status || 'completed'),
+      convId: convId || null,
+      source: source || 'manual'
+    };
+    salesStore.orders.push(order);
+    saveSalesStore();
+    return res.json({ ok: true, order });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'sales_order_failed' });
+  }
+});
+
+app.get('/api/sales/insights', (_req, res) => {
+  try {
+    // Product interest from interests and messages
+    const interestCounts = new Map();
+    for (const it of (salesStore.interests || [])) {
+      const k = it.product || 'Unknown';
+      interestCounts.set(k, (interestCounts.get(k) || 0) + 1);
+    }
+    // Revenue by product
+    const revenueByProduct = new Map();
+    for (const o of (salesStore.orders || [])) {
+      const k = o.product || 'Unknown';
+      revenueByProduct.set(k, (revenueByProduct.get(k) || 0) + Number(o.amount || 0));
+    }
+    const topInterest = Array.from(interestCounts.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([product,count])=>({product,count}));
+    const topRevenue = Array.from(revenueByProduct.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([product,amount])=>({product,amount}));
+
+    // Blockers from objections + heuristic over messages
+    const blockers = { price: 0, features: 0, trust: 0, support: 0, delivery: 0, other: 0 };
+    const keys = {
+      price: [/price/i,/cost/i,/expensive/i,/budget/i,/discount/i],
+      features: [/feature/i,/integration/i,/does it/i,/support .*?\b(X|Y|Z)\b/i,/api/i],
+      trust: [/refund/i,/guarantee/i,/security/i,/privacy/i,/scam/i,/reliable/i],
+      support: [/support/i,/help/i,/onboard/i,/training/i,/docs?/i],
+      delivery: [/delivery/i,/shipping/i,/timeline/i,/delay/i,/time/i]
+    };
+    for (const obj of (salesStore.objections || [])) {
+      const t = obj.text || '';
+      let matched = false;
+      for (const k of Object.keys(keys)) {
+        if (keys[k].some(r=>r.test(t))) { blockers[k] += 1; matched = true; break; }
+      }
+      if (!matched) blockers.other += 1;
+    }
+    // Heuristic pass on conversations
+    for (const [_convId, msgs] of (messengerStore.messages || new Map()).entries()) {
+      for (const m of (msgs || [])) {
+        if (!m || typeof m.text !== 'string') continue;
+        const t = m.text;
+        for (const k of Object.keys(keys)) {
+          if (keys[k].some(r=>r.test(t))) blockers[k] += 1;
+        }
+      }
+    }
+
+    // Recommendations
+    const recs = [];
+    if (blockers.price > 0) recs.push('Publish clear pricing tiers and add limited-time discount or flexible plans.');
+    if (blockers.features > 0) recs.push('Highlight key differentiating features; add comparison chart and roadmap.');
+    if (blockers.trust > 0) recs.push('Add testimonials, case studies, money-back guarantees, and security page.');
+    if (blockers.support > 0) recs.push('Offer onboarding sessions, live chat, and improved documentation.');
+    if (blockers.delivery > 0) recs.push('Set delivery timelines and SLAs; communicate milestones proactively.');
+    if (recs.length === 0) recs.push('Double down on channels with highest engagement and expand feature tutorials.');
+
+    const companySuggestions = [
+      'Create an AI-personalized onboarding flow that adapts to user goals.',
+      'Automate follow-ups 1h and 24h after first contact with tailored prompts.',
+      'Segment users by interest keywords and route to specialized playbooks.',
+      'Add “request a sample/demo” CTA for high-intent users detected by AI.'
+    ];
+
+    return res.json({ ok: true, insights: {
+      topProductsByInterest: topInterest,
+      topProductsByRevenue: topRevenue,
+      blockers,
+      recommendations: recs,
+      companySuggestions
+    }});
+  } catch (e) {
+    console.error('insights error', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'insights_failed' });
+  }
+});
+
 function makeCampaignNameFromDescription(desc = '') {
   const m = String(desc).match(/for\s+([\w-]+)/i);
   const product = (m && m[1]) || 'Product';
@@ -1349,6 +1473,18 @@ app.post('/webhook', async (req, res, next) => {
           const keywordMatch = (!keyword || text.toLowerCase().includes(keyword));
           if (!mediaMatch) { console.log('IG webhook: media mismatch. got', mediaId, 'expected', cfg.postId); }
           if (!keywordMatch) { console.log('IG webhook: keyword not matched. configured', keyword, 'text', text); }
+          // Detect product interest keywords and persist
+          const interestMatch = String(text).match(/(plan|pricing|price|cost|demo|trial|feature|integration|support)\b/i);
+          if (interestMatch) {
+            salesStore.interests.push({ id: 'int_' + Date.now(), date: new Date().toISOString(), product: cfg?.brief?.product || 'Unknown', customer: username, convId: igConvId, text, source: 'instagram' });
+            saveSalesStore();
+          }
+          // Simple objections detection
+          const objectionMatch = String(text).match(/(too expensive|price|missing|does it|not support|refund|scam|delay|late|time)\b/i);
+          if (objectionMatch) {
+            salesStore.objections.push({ id: 'obj_' + Date.now(), date: new Date().toISOString(), category: 'auto', text, customer: username, product: cfg?.brief?.product || 'Unknown', convId: igConvId, source: 'instagram' });
+            saveSalesStore();
+          }
           if (mediaMatch && keywordMatch) {
             try {
               // Send IG DM via Graph API (requires Page token + ig_business_account)
