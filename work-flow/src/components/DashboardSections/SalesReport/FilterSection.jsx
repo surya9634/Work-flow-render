@@ -8,7 +8,7 @@ const FilterSection = ({
   onClearFilters, 
   showFilters, 
   onToggleFilters,
-  statuses 
+  statuses
 }) => {
   // Count active filters (excluding search)
   const activeFilterCount = Object.entries(filters)

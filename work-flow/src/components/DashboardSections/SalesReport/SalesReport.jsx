@@ -67,9 +67,9 @@ const SalesReport = () => {
   }, []);
 
   // Memoized unique values for filters
-  const { categories, statuses } = useMemo(() => ({
-    statuses: [...new Set(salesData.map(item => item.status))]
-  }), [salesData]);
+  const statuses = useMemo(() => (
+    [...new Set(salesData.map(item => item.status))]
+  ), [salesData]);
 
   // Optimized filter function
   const filterData = useCallback((data, filters) => {
