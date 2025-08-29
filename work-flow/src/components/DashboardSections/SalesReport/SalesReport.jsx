@@ -287,84 +287,89 @@ const SalesReport = () => {
           onAddOrder={() => setShowAddOrder(true)}
         />
 
-        {/* AI Insights */}
-        {insights && (
-          <div className="px-6 py-4 bg-white border-b border-gray-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-3">AI Insights</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600">Top Products by Interest</p>
-                {(insights.topProductsByInterest || []).slice(0,5).map((p, i) => (
-                  <InsightBadge key={i} label={p.product} value={`${p.count} intents`} />
-                ))}
+        {/* Main content with right sidebar */}
+        <div className="px-6 py-4">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            {/* Main column */}
+            <div className="lg:col-span-3 space-y-6">
+              {/* Filters and Search */}
+              <FilterSection
+                filters={filters}
+                onFilterChange={handleFilterChange}
+                onClearFilters={clearFilters}
+                showFilters={showFilters}
+                onToggleFilters={toggleFilters}
+                statuses={statuses}
+              />
+
+              {/* Charts Row */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Revenue by Product */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">Revenue by Product</h3>
+                  <BarChart data={revenueByProduct} />
+                </div>
+                {/* Orders over Time */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">Orders over Time</h3>
+                  <LineChart data={ordersOverTime} />
+                </div>
+                {/* Status Distribution */}
+                <div className="bg-white border border-gray-200 rounded-xl p-4">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-3">Status Distribution</h3>
+                  <DoughnutChart data={statusDistribution} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600">Top Products by Revenue</p>
-                {(insights.topProductsByRevenue || []).slice(0,5).map((p, i) => (
-                  <InsightBadge key={i} label={p.product} value={`$${Number(p.amount||0).toFixed(2)}`} />
-                ))}
+
+              {/* Table */}
+              <div className="bg-white border border-gray-200 rounded-xl">
+                <SalesTable
+                  data={filteredAndSortedData}
+                  sortConfig={sortConfig}
+                  onSort={handleSort}
+                />
               </div>
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600">What’s Blocking Sales</p>
-                {insights.blockers && (
-                  <div className="grid grid-cols-2 gap-2">
-                    {Object.entries(insights.blockers).map(([k,v]) => (
-                      <InsightBadge key={k} label={k} value={v} />
-                    ))}
+            </div>
+
+            {/* Insights sidebar */}
+            <aside className="lg:col-span-1">
+              {insights && (
+                <div className="space-y-4">
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Top by Interest</h4>
+                    <div className="space-y-2">
+                      {(insights.topProductsByInterest || []).slice(0,5).map((p, i) => (
+                        <InsightBadge key={i} label={p.product} value={`${p.count}`} />
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            </div>
-            <div className="mt-4">
-              <p className="text-sm text-gray-600 mb-2">Personalized Recommendations</p>
-              <ul className="list-disc pl-5 space-y-1 text-sm text-gray-800">
-                {(insights.recommendations || []).map((r, i) => (<li key={i}>{r}</li>))}
-              </ul>
-            </div>
-            <div className="mt-3">
-              <p className="text-sm text-gray-600 mb-1">Company-level Suggestions</p>
-              <ul className="list-disc pl-5 space-y-1 text-sm text-gray-800">
-                {(insights.companySuggestions || []).map((r, i) => (<li key={i}>{r}</li>))}
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {/* Filters and Search */}
-        <FilterSection
-          filters={filters}
-          onFilterChange={handleFilterChange}
-          onClearFilters={clearFilters}
-          showFilters={showFilters}
-          onToggleFilters={toggleFilters}
-          statuses={statuses}
-        />
-
-        {/* Charts Row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
-          {/* Revenue by Product */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Revenue by Product</h3>
-            <BarChart data={revenueByProduct} />
-          </div>
-          {/* Orders over Time */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Orders over Time</h3>
-            <LineChart data={ordersOverTime} />
-          </div>
-          {/* Status Distribution */}
-          <div className="bg-white rounded-xl shadow-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Status Distribution</h3>
-            <DoughnutChart data={statusDistribution} />
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Top by Revenue</h4>
+                    <div className="space-y-2">
+                      {(insights.topProductsByRevenue || []).slice(0,5).map((p, i) => (
+                        <InsightBadge key={i} label={p.product} value={`$${Number(p.amount||0).toFixed(0)}`} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Blockers</h4>
+                    <div className="grid grid-cols-2 gap-2">
+                      {insights.blockers && Object.entries(insights.blockers).map(([k,v]) => (
+                        <InsightBadge key={k} label={k} value={v} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Recommendations</h4>
+                    <ul className="list-disc pl-4 space-y-1 text-sm text-gray-700">
+                      {(insights.recommendations || []).slice(0,4).map((r, i) => (<li key={i}>{r}</li>))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </aside>
           </div>
         </div>
-
-        {/* Table */}
-        <SalesTable
-          data={filteredAndSortedData}
-          sortConfig={sortConfig}
-          onSort={handleSort}
-        />
 
         {/* Export Progress Overlay */}
         {isExporting && (
