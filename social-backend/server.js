@@ -736,7 +736,29 @@ app.post('/api/campaigns', (req, res) => {
 
 // List campaigns
 app.get('/api/campaigns', (_req, res) => {
-  return res.json(Array.from(campaignsStore.campaigns.values()));
+  try {
+    const list = Array.from(campaignsStore.campaigns.values()).map(c => {
+      let sent = 0, replied = 0;
+      const convId = c.conversationId;
+      if (convId) {
+        const msgs = messengerStore.messages.get(convId) || [];
+        // Messages we sent (AI or agent)
+        sent = msgs.filter(m => m.sender === 'ai' || m.sender === 'agent').length;
+        // Customer messages that received a subsequent reply
+        for (let i = 0; i < msgs.length; i++) {
+          if (msgs[i].sender !== 'customer') continue;
+          for (let j = i + 1; j < msgs.length; j++) {
+            const n = msgs[j];
+            if (n.sender === 'ai' || n.sender === 'agent') { replied += 1; break; }
+          }
+        }
+      }
+      return { ...c, stats: { sent, replied } };
+    });
+    return res.json(list);
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'list_campaigns_failed' });
+  }
 });
 
 // Stop campaign: pause AI for its conversation
