@@ -9,9 +9,9 @@ import SalesTable from './SalesTable';
 import ExportProgress from './ExportProgress';
 import { salesData as initialSalesData } from '../../data/salesData';
 // import SalesReportWithNotifications from './DailyNotifications';
-import BarChart from '../../Analytics/Charts/BarChart';
-import LineChart from '../../Analytics/Charts/LineChart';
-import DoughnutChart from '../../Analytics/Charts/DoughnutChart';
+import BarChart from '../Analytics/Charts/BarChart';
+import LineChart from '../Analytics/Charts/LineChart';
+import DoughnutChart from '../Analytics/Charts/DoughnutChart';
 import AddOrderModal from './AddOrderModal';
 
 const SalesReport = () => {
