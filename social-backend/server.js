@@ -1065,6 +1065,79 @@ app.get('/api/messenger/messages', async (req, res) => {
   }
 });
 
+// Analyze a conversation with AI and return structured insights
+app.post('/api/ai/analyze-conversation', async (req, res) => {
+  try {
+    const conversationId = req.body?.conversationId || req.query?.conversationId;
+    if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
+
+    // Fetch messages (reuse FB path when configured)
+    let messages = [];
+    if (config.facebook.provider === 'facebook') {
+      if (!config.facebook.pageToken || !config.facebook.pageId) {
+        return res.status(400).json({ error: 'facebook_not_configured' });
+      }
+      const data = await fbApiGet(`${conversationId}/messages`, { fields: 'message,from,created_time', limit: 100 });
+      messages = (data.data || []).reverse().map((m, idx) => ({
+        id: m.id || `fb_${idx}`,
+        sender: m.from && (String(m.from.id) === String(config.facebook.pageId) || String(m.from.id) === String(config.facebook.appId)) ? 'agent' : 'customer',
+        text: m.message || '',
+        timestamp: m.created_time || new Date().toISOString(),
+      }));
+    } else {
+      messages = messengerStore.messages.get(conversationId) || [];
+    }
+
+    // Build compact transcript (last 40 messages)
+    const last = messages.slice(-40).map(m => `${m.sender}: ${m.text}`);
+    const systemPrompt = `You are a sales counsellor AI. Read the chat transcript and output a concise JSON with:
+- intent: short description of what the user wants
+- interestScore: 0-100
+- stage: one of [awareness, consideration, evaluation, decision, post-sale]
+- urgency: low|medium|high
+- objections: array of strings
+- suggestedNextStep: one actionable next step
+- recommendedContent: array of content suggestions (e.g., pricing page, case study)
+- summary: 2-3 line summary
+Return ONLY JSON.`;
+
+    let aiResult = null;
+    try {
+      const text = await generateWithGemini(last.join('\n'), systemPrompt);
+      try { aiResult = JSON.parse(text); } catch (_) { aiResult = null; }
+    } catch (e) {
+      aiResult = null;
+    }
+
+    // Heuristic fallback if AI key missing or parsing failed
+    if (!aiResult) {
+      const all = last.join('\n').toLowerCase();
+      const wantsDemo = /demo|schedule|call|meeting/.test(all);
+      const pricing = /price|pricing|cost|budget/.test(all);
+      const timeline = /today|this week|asap|urgent|soon/.test(all);
+      const objections = [];
+      if (/too (expensive|costly)|budget/.test(all)) objections.push('Pricing concerns');
+      if (/not sure|confus|how it work/.test(all)) objections.push('Clarity/fit');
+      const interestScore = Math.min(100, (wantsDemo ? 60 : 0) + (pricing ? 30 : 0) + (timeline ? 20 : 0) + (messages.filter(m=>m.sender==='customer').length > 3 ? 10 : 0));
+      aiResult = {
+        intent: wantsDemo ? 'Wants a demo' : (pricing ? 'Evaluating pricing' : 'General inquiry'),
+        interestScore,
+        stage: wantsDemo ? 'evaluation' : (pricing ? 'consideration' : 'awareness'),
+        urgency: timeline ? 'high' : (pricing ? 'medium' : 'low'),
+        objections,
+        suggestedNextStep: wantsDemo ? 'Offer available demo slots and send calendar link' : (pricing ? 'Share pricing overview and value props' : 'Ask 1-2 qualifying questions to understand needs'),
+        recommendedContent: wantsDemo ? ['Case study', 'Product walkthrough video'] : (pricing ? ['Pricing page', 'ROI calculator'] : ['One-pager overview']),
+        summary: 'Heuristic analysis based on recent messages.'
+      };
+    }
+
+    return res.json({ conversationId, analysis: aiResult });
+  } catch (err) {
+    console.error('Analyze conversation error:', serializeError(err));
+    return res.status(500).json({ error: 'analyze_failed' });
+  }
+});
+
 // Create conversation
 app.post('/api/messenger/conversations', (req, res) => {
   const { name, username, profilePic } = req.body || {};

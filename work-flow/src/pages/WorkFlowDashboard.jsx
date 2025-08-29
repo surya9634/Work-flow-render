@@ -23,6 +23,7 @@ import Navbar from '../components/Navbar/Navbar';
 import Chats from '../components/DashboardSections/Chats/Chats';
 import SignOutModal from '../components/SignOutModal';
 import CampaignsDemo from '../components/CreateCampaign/CampaignsDemo';
+import AICounsellor from '../components/DashboardSections/AICounsellor/AICounsellor';
 const WorkFlowDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
@@ -33,9 +34,10 @@ const WorkFlowDashboard = () => {
     { icon: Users, label: 'User Profile', path: 'profile' },
     { icon: BarChart3, label: 'Analytics', path: 'analytics' },
     { icon: Settings, label: 'AI Fine-Tuning', path: 'ai-fine-tuning' },
-     { icon: Target, label: 'Campaigns', path: 'campaigns' },
+    { icon: Target, label: 'Campaigns', path: 'campaigns' },
     { icon: Share2, label: 'Integration', path: 'integration' },
     { icon: MessagesSquare, label: 'Chats', path: 'chats' },
+    { icon: FileText, label: 'AI Counsellor', path: 'ai-counsellor' },
     { icon: FileText, label: 'Sales & Reports', path: 'sales-reports' },
   ];
 
@@ -163,6 +165,7 @@ const WorkFlowDashboard = () => {
             <Route path="/ai-fine-tuning" element={<AIFineTuning />} />
             <Route path="/integration" element={<Integration />} />
             <Route path="/chats" element={<Chats />} />
+            <Route path="/ai-counsellor" element={<AICounsellor />} />
             <Route path="/sales-reports" element={<SalesReport />} />
             <Route path="*" element={<Navigate to="/dashboard/profile" replace />} />
           </Routes>
