@@ -142,6 +142,7 @@ const AICounsellor = () => {
                     setError(typeof data?.error === 'string' ? data.error : 'Failed to save system prompt');
                     return;
                   }
+                  setError('');
                 } catch (_) {
                   setError('Failed to save system prompt');
                 }

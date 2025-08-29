@@ -1101,9 +1101,15 @@ app.post('/api/ai/analyze-conversation', async (req, res) => {
 - summary: 2-3 line summary
 Return ONLY JSON.`;
 
+    // Merge business/system prompt into the AI instruction and request multiple future actions
+    const providedSP = (req.body && req.body.systemPrompt) ? String(req.body.systemPrompt) : '';
+    const storedSP = messengerStore.systemPrompts.get(conversationId) || '';
+    const businessContext = (providedSP || storedSP).trim();
+    const sp2 = `${systemPrompt}${businessContext ? `\nBusiness context (what we sell, positioning, tone): ${businessContext}\n` : ''}\nAdditionally, include nextBestActions: an array of 3 concise, concrete future actions tailored to the context (with brief reasoning).`;
+
     let aiResult = null;
     try {
-      const text = await generateWithGemini(last.join('\n'), systemPrompt);
+      const text = await generateWithGemini(last.join('\n'), sp2);
       try { aiResult = JSON.parse(text); } catch (_) { aiResult = null; }
     } catch (e) {
       aiResult = null;
