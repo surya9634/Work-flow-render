@@ -19,6 +19,10 @@ const AICounsellor = () => {
       try {
         const res = await fetch('/api/messenger/conversations');
         const data = await res.json();
+        if (!res.ok) {
+          if (!ignore) setError(typeof data?.error === 'string' ? data.error : 'Failed to load conversations');
+          return;
+        }
         if (!ignore && Array.isArray(data)) setConversations(data);
       } catch (e) {
         if (!ignore) setError('Failed to load conversations');
@@ -43,7 +47,10 @@ const AICounsellor = () => {
         body: JSON.stringify({ conversationId: selectedId })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'analyze_failed');
+      if (!res.ok) {
+        setError(typeof data?.error === 'string' ? data.error : 'analyze_failed');
+        return;
+      }
       setAnalysis(data.analysis || null);
     } catch (e) {
       setError('Analysis failed');
