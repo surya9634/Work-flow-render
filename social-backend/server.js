@@ -1339,6 +1339,8 @@ app.post('/webhook', async (req, res, next) => {
             messengerStore.messages.set(igConvId, arr);
             const conv = messengerStore.conversations.get(igConvId);
             if (conv) { conv.lastMessage = text; conv.timestamp = nowIso; messengerStore.conversations.set(igConvId, conv); }
+            // record last customer time for response measurement
+            lastCustomerAtByConversation.set(igConvId, new Date(nowIso).getTime());
             saveMessengerStore();
           } catch (e) { console.warn('IG persist comment failed:', e?.message || e); }
           // Match configured post and keyword
@@ -1360,16 +1362,27 @@ app.post('/webhook', async (req, res, next) => {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 15000,
               });
-              // persist IG outbound DM as 'agent' message for analytics
+              // persist IG outbound DM as 'ai' message for analytics and compute response time
               try {
                 const nowIso = new Date().toISOString();
                 const arr = messengerStore.messages.get(igConvId) || [];
                 const outText = String(cfg.response || 'Hi! How are you doing?');
-                arr.push({ id: 'igdm_' + Date.now(), sender: 'agent', text: outText, timestamp: nowIso, isRead: true, meta: { to: username } });
+                const aiMsg = { id: 'igdm_' + Date.now(), sender: 'ai', text: outText, timestamp: nowIso, isRead: true, meta: { to: username } };
+                arr.push(aiMsg);
                 messengerStore.messages.set(igConvId, arr);
                 const conv = messengerStore.conversations.get(igConvId);
                 if (conv) { conv.lastMessage = outText; conv.timestamp = nowIso; messengerStore.conversations.set(igConvId, conv); }
+                // compute response time if we have a last customer timestamp
+                const lastTs = lastCustomerAtByConversation.get(igConvId);
+                if (typeof lastTs === 'number') {
+                  const rt = new Date(nowIso).getTime() - lastTs;
+                  const list = messengerStore.responseTimes.get(igConvId) || [];
+                  list.push(rt);
+                  messengerStore.responseTimes.set(igConvId, list);
+                  lastCustomerAtByConversation.delete(igConvId);
+                }
                 saveMessengerStore();
+                io.emit('messenger:message_created', { conversationId: igConvId, message: aiMsg });
               } catch (e) { console.warn('IG persist DM failed:', e?.message || e); }
               console.log(`[IG Auto-DM] Sent to @${username} for media ${mediaId}`);
             } catch (sendErr) {
