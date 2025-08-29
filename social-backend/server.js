@@ -1311,19 +1311,26 @@ app.post('/webhook', async (req, res, next) => {
         const igUserId = String(entry.id || '');
         const user = users.get(igUserId);
         const cfg = configurations.get(igUserId);
+        if (!user) { console.log('IG webhook: no user found for id', igUserId); }
+        if (!cfg) { console.log('IG webhook: no configuration for id', igUserId); }
         if (!user || !cfg) continue; // not configured
         const changes = Array.isArray(entry.changes) ? entry.changes : [];
+        console.log('IG webhook: changes count', changes.length, 'for user', igUserId);
         for (const change of changes) {
           const field = change.field || '';
           const val = change.value || {};
-          if (field !== 'comments') continue;
+          if (field !== 'comments') { continue; }
           const mediaId = String(val.media_id || '');
           const text = String(val.text || '');
           const username = val.username || '';
-          if (!mediaId || !username) continue;
+          if (!mediaId || !username) { console.log('IG webhook: missing mediaId or username'); continue; }
           // Match configured post and keyword
           const keyword = String(cfg.keyword || '').toLowerCase();
-          if (String(cfg.postId) === mediaId && (!keyword || text.toLowerCase().includes(keyword))) {
+          const mediaMatch = String(cfg.postId) === mediaId;
+          const keywordMatch = (!keyword || text.toLowerCase().includes(keyword));
+          if (!mediaMatch) { console.log('IG webhook: media mismatch. got', mediaId, 'expected', cfg.postId); }
+          if (!keywordMatch) { console.log('IG webhook: keyword not matched. configured', keyword, 'text', text); }
+          if (mediaMatch && keywordMatch) {
             try {
               // Send IG DM via Graph API (requires Page token + ig_business_account)
               const igBizId = await ensureIgBusinessId();
@@ -1423,6 +1430,15 @@ app.get('/api/instagram/health', async (_req, res) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: String(err?.message || err) });
   }
+});
+
+// Debug: list IG users and configurations
+app.get('/api/instagram/debug-config', (_req, res) => {
+  const u = [];
+  for (const [id, v] of users.entries()) { u.push({ id, username: v.username || '', platform: v.platform }); }
+  const cfgs = [];
+  for (const [id, v] of configurations.entries()) { cfgs.push({ id, postId: v.postId, keyword: v.keyword }); }
+  return res.json({ users: u, configurations: cfgs, pageId: config.facebook.pageId, pageTokenSet: !!config.facebook.pageToken });
 });
 
 // --- Analytics API ---
