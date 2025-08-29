@@ -1582,7 +1582,7 @@ app.get('/api/analytics', (_req, res) => {
     const perPlatRates = Object.fromEntries(platforms.map(p => [p, new Array(weeks).fill(0)]));
     const perPlatCounts = Object.fromEntries(platforms.map(p => [p, new Array(weeks).fill(0)]));
     for (const [convId, arr] of byConv.entries()) {
-      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (fbIds.has(convId) ? 'Messenger' : 'Messenger');
+      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (convId.startsWith('ig_') ? 'Instagram' : (fbIds.has(convId) ? 'Messenger' : 'Messenger'));
       for (let i = 0; i < arr.length; i++) {
         const m = arr[i];
         if (m.sender !== 'customer') continue;
