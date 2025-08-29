@@ -668,7 +668,8 @@ function seedMessengerDataIfEmpty() {
 
 ensureDir(dataDir);
 loadMessengerStore();
-if (config.facebook.provider !== 'facebook') {
+// Allow demo seeding only when explicitly enabled
+if (String(process.env.SEED_DEMO_DATA || '').toLowerCase() === 'true' && config.facebook.provider !== 'facebook') {
   seedMessengerDataIfEmpty();
 }
 
@@ -1311,6 +1312,12 @@ app.post('/webhook', async (req, res, next) => {
         const igUserId = String(entry.id || '');
         const user = users.get(igUserId);
         const cfg = configurations.get(igUserId);
+        const igConvId = 'ig_' + igUserId; // aggregate IG events under this conversation for analytics
+        if (!messengerStore.conversations.get(igConvId)) {
+          messengerStore.conversations.set(igConvId, { id: igConvId, name: `Instagram:${igUserId}`, profilePic: '', lastMessage: '', timestamp: new Date().toISOString(), unreadCount: 0 });
+          messengerStore.messages.set(igConvId, []);
+          saveMessengerStore();
+        }
         if (!user) { console.log('IG webhook: no user found for id', igUserId); }
         if (!cfg) { console.log('IG webhook: no configuration for id', igUserId); }
         if (!user || !cfg) continue; // not configured
@@ -1324,6 +1331,16 @@ app.post('/webhook', async (req, res, next) => {
           const text = String(val.text || '');
           const username = val.username || '';
           if (!mediaId || !username) { console.log('IG webhook: missing mediaId or username'); continue; }
+          // persist IG incoming comment as a customer message for analytics
+          try {
+            const nowIso = new Date().toISOString();
+            const arr = messengerStore.messages.get(igConvId) || [];
+            arr.push({ id: 'igc_' + Date.now(), sender: 'customer', text, timestamp: nowIso, isRead: true, meta: { mediaId, username } });
+            messengerStore.messages.set(igConvId, arr);
+            const conv = messengerStore.conversations.get(igConvId);
+            if (conv) { conv.lastMessage = text; conv.timestamp = nowIso; messengerStore.conversations.set(igConvId, conv); }
+            saveMessengerStore();
+          } catch (e) { console.warn('IG persist comment failed:', e?.message || e); }
           // Match configured post and keyword
           const keyword = String(cfg.keyword || '').toLowerCase();
           const mediaMatch = String(cfg.postId) === mediaId;
@@ -1343,6 +1360,17 @@ app.post('/webhook', async (req, res, next) => {
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 15000,
               });
+              // persist IG outbound DM as 'agent' message for analytics
+              try {
+                const nowIso = new Date().toISOString();
+                const arr = messengerStore.messages.get(igConvId) || [];
+                const outText = String(cfg.response || 'Hi! How are you doing?');
+                arr.push({ id: 'igdm_' + Date.now(), sender: 'agent', text: outText, timestamp: nowIso, isRead: true, meta: { to: username } });
+                messengerStore.messages.set(igConvId, arr);
+                const conv = messengerStore.conversations.get(igConvId);
+                if (conv) { conv.lastMessage = outText; conv.timestamp = nowIso; messengerStore.conversations.set(igConvId, conv); }
+                saveMessengerStore();
+              } catch (e) { console.warn('IG persist DM failed:', e?.message || e); }
               console.log(`[IG Auto-DM] Sent to @${username} for media ${mediaId}`);
             } catch (sendErr) {
               console.warn('IG Auto-DM failed:', serializeError(sendErr));
@@ -1453,7 +1481,7 @@ app.get('/api/analytics', (_req, res) => {
     const flat = [];
     const fbIds = new Set(Array.from(fbConvParticipants.keys()));
     for (const [convId, msgs] of messagesMap.entries()) {
-      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (fbIds.has(convId) ? 'Messenger' : 'Messenger');
+      const platform = convId.startsWith('wa_') ? 'WhatsApp' : (convId.startsWith('ig_') ? 'Instagram' : (fbIds.has(convId) ? 'Messenger' : 'Messenger'));
       for (const m of msgs || []) {
         flat.push({ conversationId: convId, platform, sender: m.sender, timestamp: new Date(m.timestamp).getTime() });
       }
