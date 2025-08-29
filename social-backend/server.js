@@ -697,16 +697,29 @@ const salesFile = path.join(dataDir, 'sales.json');
 const salesStore = {
   orders: [], // [{id,date,product,quantity,amount,customer,status,source,convId}]
   interests: [], // [{id,date,product,customer,convId,text,source}]
-  objections: [] // [{id,date,category,text,customer,product,convId,source}]
+  objections: [], // [{id,date,category,text,customer,product,convId,source}]
+  intents: [], // [{id,date,type,text,customer,product,convId,source}]
+  featureRequests: [], // [{id,date,text,customer,product,convId,source}]
+  sentiments: [] // [{id,date,label,score,text,customer,product,convId,source}]
 };
 function loadSalesStore() {
-  const json = readJsonSafe(salesFile, { orders: [], interests: [], objections: [] });
+  const json = readJsonSafe(salesFile, { orders: [], interests: [], objections: [], intents: [], featureRequests: [], sentiments: [] });
   salesStore.orders = Array.isArray(json.orders) ? json.orders : [];
   salesStore.interests = Array.isArray(json.interests) ? json.interests : [];
   salesStore.objections = Array.isArray(json.objections) ? json.objections : [];
+  salesStore.intents = Array.isArray(json.intents) ? json.intents : [];
+  salesStore.featureRequests = Array.isArray(json.featureRequests) ? json.featureRequests : [];
+  salesStore.sentiments = Array.isArray(json.sentiments) ? json.sentiments : [];
 }
 function saveSalesStore() {
-  writeJsonSafe(salesFile, { orders: salesStore.orders, interests: salesStore.interests, objections: salesStore.objections });
+  writeJsonSafe(salesFile, {
+    orders: salesStore.orders,
+    interests: salesStore.interests,
+    objections: salesStore.objections,
+    intents: salesStore.intents,
+    featureRequests: salesStore.featureRequests,
+    sentiments: salesStore.sentiments
+  });
 }
 loadSalesStore();
 
@@ -716,6 +729,110 @@ app.get('/api/sales/report', (_req, res) => {
     return res.json({ ok: true, data: salesStore.orders || [] });
   } catch (e) {
     return res.status(500).json({ ok: false, error: 'sales_report_failed' });
+  }
+});
+
+// Aggregate insights across all chats (rules-based extraction)
+app.get('/api/sales/insights', (_req, res) => {
+  try {
+    const messagesMap = messengerStore.messages || new Map();
+
+    // Collect signals
+    const interestByProduct = new Map();
+    const revenueByProduct = new Map();
+    const blockers = { price: 0, features: 0, trust: 0, support: 0, delivery: 0, other: 0 };
+    const requestedFeatures = new Map();
+    const intentsCount = { demo: 0, pricing: 0, buy: 0, churn: 0 };
+    const sentiment = { positive: 0, neutral: 0, negative: 0 };
+
+    const rx = {
+      interest: [/price|pricing|cost|demo|trial|feature|integration|support/i],
+      objections: {
+        price: [/expensive|too much|costly|cheap|price|budget/i],
+        features: [/feature|integration|does it|support\s+.*\b(api|zapier|shopify|whatsapp)\b/i],
+        trust: [/refund|guarantee|security|privacy|scam|reliable/i],
+        support: [/support|help|onboard|training|docs?/i],
+        delivery: [/delivery|shipping|timeline|delay|time/i]
+      },
+      intents: {
+        demo: [/demo|walkthrough|show me/i],
+        pricing: [/price|pricing|quote|cost/i],
+        buy: [/buy|purchase|pay|invoice|subscribe/i],
+        churn: [/cancel|stop|refund|chargeback/i]
+      },
+      features: [/feature|integration|api|support .*?\b(zapier|shopify|stripe|facebook|instagram|whatsapp)\b/i],
+      positive: [/(great|awesome|thanks|love|good|perfect|amazing)/i],
+      negative: [/(bad|hate|angry|terrible|worst|bug|broken|late)/i]
+    };
+
+    // Walk all messages
+    for (const [convId, msgs] of messagesMap.entries()) {
+      for (const m of (msgs || [])) {
+        if (!m || typeof m.text !== 'string') continue;
+        const t = m.text;
+        // Intents
+        for (const k of Object.keys(rx.intents)) {
+          if (rx.intents[k].some(r=>r.test(t))) intentsCount[k] += 1;
+        }
+        // Interests
+        if (rx.interest.some(r=>r.test(t))) {
+          salesStore.intents.push({ id: 'intent_'+Date.now(), date: new Date().toISOString(), type: 'interest', text: t, customer: m.sender === 'customer' ? 'customer' : 'unknown', product: 'Unknown', convId, source: 'chat' });
+        }
+        // Objections
+        let matchedObjection = false;
+        for (const cat of Object.keys(rx.objections)) {
+          if (rx.objections[cat].some(r=>r.test(t))) { blockers[cat] += 1; matchedObjection = true; }
+        }
+        if (!matchedObjection && /price|feature|support|refund|delay/i.test(t)) blockers.other += 1;
+        // Feature requests
+        const fm = t.match(/(?:need|want|add|support|integrate)\s+([\w\s-]{3,40})/i);
+        if (fm) {
+          const f = fm[1].trim().toLowerCase();
+          requestedFeatures.set(f, (requestedFeatures.get(f) || 0) + 1);
+          salesStore.featureRequests.push({ id: 'feat_'+Date.now(), date: new Date().toISOString(), text: t, customer: 'customer', product: 'Unknown', convId, source: 'chat' });
+        }
+        // Sentiment
+        if (rx.positive.some(r=>r.test(t))) sentiment.positive += 1;
+        else if (rx.negative.some(r=>r.test(t))) sentiment.negative += 1;
+        else sentiment.neutral += 1;
+      }
+    }
+
+    // Product revenue from orders
+    for (const o of (salesStore.orders || [])) {
+      const k = o.product || 'Unknown';
+      revenueByProduct.set(k, (revenueByProduct.get(k) || 0) + Number(o.amount || 0));
+    }
+
+    // Interests from store
+    for (const it of (salesStore.interests || [])) {
+      const k = it.product || 'Unknown';
+      interestByProduct.set(k, (interestByProduct.get(k) || 0) + 1);
+    }
+
+    const topByInterest = Array.from(interestByProduct.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([product,count])=>({product,count}));
+    const topByRevenue = Array.from(revenueByProduct.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([product,amount])=>({product,amount}));
+    const topFeatures = Array.from(requestedFeatures.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([feature,count])=>({feature,count}));
+
+    const recs = [];
+    if (blockers.price > 0) recs.push('Clarify pricing; add tier comparison and limited-time offers.');
+    if (blockers.features > 0) recs.push('Publish integrations and roadmap; highlight differentiators.');
+    if (blockers.trust > 0) recs.push('Add testimonials, guarantees, and security details.');
+    if (blockers.support > 0) recs.push('Offer onboarding calls and better docs/FAQ.');
+    if (blockers.delivery > 0) recs.push('Communicate timelines and SLAs early.');
+    if (recs.length === 0) recs.push('Double down on channels with highest engagement.');
+
+    return res.json({ ok: true, insights: {
+      topProductsByInterest: topByInterest,
+      topProductsByRevenue: topByRevenue,
+      blockers,
+      requestedFeatures: topFeatures,
+      intents: intentsCount,
+      sentiment,
+      recommendations: recs
+    }});
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'insights_failed' });
   }
 });
 

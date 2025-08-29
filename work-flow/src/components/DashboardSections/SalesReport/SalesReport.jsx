@@ -360,6 +360,29 @@ const SalesReport = () => {
                     </div>
                   </div>
                   <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Top Features</h4>
+                    <div className="space-y-2">
+                      {(insights.requestedFeatures || []).map((f, i) => (
+                        <InsightBadge key={i} label={f.feature} value={f.count} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Intents & Sentiment</h4>
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {insights.intents && Object.entries(insights.intents).map(([k,v]) => (
+                        <InsightBadge key={k} label={k} value={v} />
+                      ))}
+                    </div>
+                    {insights.sentiment && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <InsightBadge label="positive" value={insights.sentiment.positive} />
+                        <InsightBadge label="neutral" value={insights.sentiment.neutral} />
+                        <InsightBadge label="negative" value={insights.sentiment.negative} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
                     <h4 className="text-sm font-semibold text-gray-800 mb-2">Recommendations</h4>
                     <ul className="list-disc pl-4 space-y-1 text-sm text-gray-700">
                       {(insights.recommendations || []).slice(0,4).map((r, i) => (<li key={i}>{r}</li>))}
