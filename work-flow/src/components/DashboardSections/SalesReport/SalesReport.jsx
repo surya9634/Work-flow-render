@@ -9,6 +9,10 @@ import SalesTable from './SalesTable';
 import ExportProgress from './ExportProgress';
 import { salesData as initialSalesData } from '../../data/salesData';
 // import SalesReportWithNotifications from './DailyNotifications';
+import BarChart from '../../Analytics/Charts/BarChart';
+import LineChart from '../../Analytics/Charts/LineChart';
+import DoughnutChart from '../../Analytics/Charts/DoughnutChart';
+import AddOrderModal from './AddOrderModal';
 
 const SalesReport = () => {
   // State management
@@ -26,6 +30,8 @@ const SalesReport = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
+  const [showAddOrder, setShowAddOrder] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   // Load real orders + AI insights
   useEffect(() => {
@@ -128,6 +134,62 @@ const SalesReport = () => {
     };
   }, [filteredAndSortedData]);
 
+  // Chart data
+  const revenueByProduct = useMemo(() => {
+    const byProduct = new Map();
+    for (const o of filteredAndSortedData) {
+      byProduct.set(o.product, (byProduct.get(o.product) || 0) + Number(o.amount || 0));
+    }
+    const labels = Array.from(byProduct.keys());
+    const values = Array.from(byProduct.values());
+    return {
+      labels,
+      datasets: [{
+        label: 'Revenue',
+        data: values,
+        backgroundColor: 'rgba(59, 130, 246, 0.4)',
+        borderColor: 'rgb(59, 130, 246)'
+      }]
+    };
+  }, [filteredAndSortedData]);
+
+  const ordersOverTime = useMemo(() => {
+    const byDate = new Map();
+    for (const o of filteredAndSortedData) {
+      const d = String(o.date).slice(0,10);
+      byDate.set(d, (byDate.get(d) || 0) + 1);
+    }
+    const labels = Array.from(byDate.keys()).sort();
+    const values = labels.map(d => byDate.get(d));
+    return {
+      labels,
+      datasets: [{
+        label: 'Orders',
+        data: values,
+        borderColor: 'rgb(16, 185, 129)',
+        backgroundColor: 'rgba(16, 185, 129, 0.2)',
+        tension: 0.4,
+        fill: true
+      }]
+    };
+  }, [filteredAndSortedData]);
+
+  const statusDistribution = useMemo(() => {
+    const byStatus = new Map();
+    for (const o of filteredAndSortedData) {
+      byStatus.set(o.status, (byStatus.get(o.status) || 0) + 1);
+    }
+    const labels = Array.from(byStatus.keys());
+    const values = labels.map(s => byStatus.get(s));
+    return {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: ['rgb(59,130,246)','rgb(16,185,129)','rgb(245,158,11)','rgb(239,68,68)']
+      }]
+    };
+  }, [filteredAndSortedData]);
+
   // Handler functions
   const handleSort = useCallback((key) => {
     setSortConfig(current => ({
@@ -222,6 +284,7 @@ const SalesReport = () => {
           exportProgress={exportProgress}
           hasData={filteredAndSortedData.length > 0}
           summaryStats={summaryStats}
+          onAddOrder={() => setShowAddOrder(true)}
         />
 
         {/* AI Insights */}
@@ -278,6 +341,25 @@ const SalesReport = () => {
           statuses={statuses}
         />
 
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+          {/* Revenue by Product */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Revenue by Product</h3>
+            <BarChart data={revenueByProduct} />
+          </div>
+          {/* Orders over Time */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Orders over Time</h3>
+            <LineChart data={ordersOverTime} />
+          </div>
+          {/* Status Distribution */}
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">Status Distribution</h3>
+            <DoughnutChart data={statusDistribution} />
+          </div>
+        </div>
+
         {/* Table */}
         <SalesTable
           data={filteredAndSortedData}
@@ -290,6 +372,32 @@ const SalesReport = () => {
           <ExportProgress progress={exportProgress} />
         )}
       </div>
+
+      {/* Add Order Modal */}
+      {showAddOrder && (
+        <AddOrderModal
+          onClose={() => setShowAddOrder(false)}
+          onSave={async (payload) => {
+            try {
+              setSavingOrder(true);
+              const res = await fetch('/api/sales/order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+              });
+              const json = await res.json();
+              if (json?.ok) {
+                // optimistically reload orders
+                setShowAddOrder(false);
+              }
+            } catch (_) {
+            } finally {
+              setSavingOrder(false);
+            }
+          }}
+          saving={savingOrder}
+        />
+      )}
     </div>
   );
 };
