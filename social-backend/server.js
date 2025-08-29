@@ -2013,7 +2013,19 @@ app.use(express.static(clientDir, {
   maxAge: '1h'
 }));
 
-// Save or fetch system prompt for a conversation
+// System prompt endpoints
+app.get('/api/messenger/system-prompt', (req, res) => {
+  try {
+    const id = req.query?.conversationId;
+    if (!id) return res.status(400).json({ error: 'conversationId required' });
+    const sp = messengerStore.systemPrompts.get(String(id)) || '';
+    return res.json({ systemPrompt: sp });
+  } catch (err) {
+    console.error('Fetch system prompt error:', serializeError(err));
+    return res.status(500).json({ error: 'fetch_system_prompt_failed' });
+  }
+});
+
 app.post('/api/messenger/system-prompt', (req, res) => {
   try {
     const { conversationId, systemPrompt } = req.body || {};

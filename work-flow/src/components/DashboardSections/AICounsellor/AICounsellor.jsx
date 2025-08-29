@@ -9,6 +9,7 @@ const AICounsellor = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState(null);
   const [error, setError] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
 
   // Load available conversations (Messenger for now; extendable later)
   useEffect(() => {
@@ -35,6 +36,27 @@ const AICounsellor = () => {
 
   const selected = useMemo(() => conversations.find(c => c.id === selectedId) || null, [conversations, selectedId]);
 
+  // Load stored system prompt when conversation changes
+  useEffect(() => {
+    let ignore = false;
+    if (!selectedId) { setSystemPrompt(''); return; }
+    (async () => {
+      try {
+        const res = await fetch('/api/messenger/messages?conversationId=' + encodeURIComponent(selectedId));
+        // We don't need messages here; just try fetch stored prompt via a dedicated endpoint soon.
+      } catch (_) {}
+      // Try to fetch stored system prompt via a tiny POST (existing save endpoint doesn’t have GET; we can extend later)
+      try {
+        const res = await fetch('/api/messenger/system-prompt?conversationId=' + encodeURIComponent(selectedId));
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data?.systemPrompt === 'string') setSystemPrompt(data.systemPrompt);
+        }
+      } catch (_) {}
+    })();
+    return () => { ignore = true; };
+  }, [selectedId]);
+
   const handleAnalyze = async () => {
     if (!selectedId) return;
     setAnalyzing(true);
@@ -44,7 +66,7 @@ const AICounsellor = () => {
       const res = await fetch('/api/ai/analyze-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: selectedId })
+        body: JSON.stringify({ conversationId: selectedId, systemPrompt })
       });
       const data = await res.json();
       if (!res.ok) {
@@ -94,6 +116,44 @@ const AICounsellor = () => {
             </button>
           </div>
         </div>
+
+        {/* System prompt editor */}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-gray-700">System prompt (what we sell, positioning, tone)</label>
+          <textarea
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[100px]"
+            placeholder="e.g., We sell a SaaS workflow automation tool for SMBs. Emphasize ROI, fast onboarding, and 24/7 support. Use friendly, concise tone."
+            value={systemPrompt}
+            onChange={e => setSystemPrompt(e.target.value)}
+            disabled={!selectedId}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (!selectedId) return;
+                try {
+                  const res = await fetch('/api/messenger/system-prompt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ conversationId: selectedId, systemPrompt })
+                  });
+                  if (!res.ok) {
+                    const data = await res.json().catch(()=>({}));
+                    setError(typeof data?.error === 'string' ? data.error : 'Failed to save system prompt');
+                    return;
+                  }
+                } catch (_) {
+                  setError('Failed to save system prompt');
+                }
+              }}
+              disabled={!selectedId}
+              className={`px-3 py-2 rounded-lg text-white font-medium ${!selectedId ? 'bg-gray-400' : 'bg-gray-800 hover:bg-gray-900'} transition-colors`}
+            >
+              Save prompt
+            </button>
+          </div>
+        </div>
+
         {error && <div className="text-sm text-red-600">{error}</div>}
       </div>
 
