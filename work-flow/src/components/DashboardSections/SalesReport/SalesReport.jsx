@@ -337,7 +337,6 @@ const SalesReport = () => {
           onClearFilters={clearFilters}
           showFilters={showFilters}
           onToggleFilters={toggleFilters}
-          categories={categories}
           statuses={statuses}
         />
 
