@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { Package } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -10,10 +10,10 @@ import ExportProgress from './ExportProgress';
 import { salesData as initialSalesData } from '../../data/salesData';
 // import SalesReportWithNotifications from './DailyNotifications';
 
-
 const SalesReport = () => {
   // State management
-  const [salesData] = useState(initialSalesData);
+  const [salesData, setSalesData] = useState(initialSalesData);
+  const [insights, setInsights] = useState(null);
   const [filters, setFilters] = useState({
     search: '',
     dateFrom: '',
@@ -27,6 +27,39 @@ const SalesReport = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
 
+  // Load real orders + AI insights
+  useEffect(() => {
+    let ignore = false;
+    async function load() {
+      try {
+        const [ordersRes, insightsRes] = await Promise.all([
+          fetch('/api/sales/report'),
+          fetch('/api/sales/insights')
+        ]);
+        const ordersJson = await ordersRes.json().catch(() => null);
+        const insightsJson = await insightsRes.json().catch(() => null);
+        if (!ignore) {
+          if (ordersJson && ordersJson.ok && Array.isArray(ordersJson.data)) {
+            // Normalize field casing to match UI expectations
+            const normalized = ordersJson.data.map(o => ({
+              ...o,
+              status: (o.status || '').charAt(0).toUpperCase() + (o.status || '').slice(1)
+            }));
+            setSalesData(normalized.length ? normalized : initialSalesData);
+          }
+          if (insightsJson && insightsJson.ok) setInsights(insightsJson.insights || null);
+        }
+      } catch (_) {
+        if (!ignore) {
+          // keep fallback
+        }
+      }
+    }
+    load();
+    const id = setInterval(load, 5000);
+    return () => { ignore = true; clearInterval(id); };
+  }, []);
+
   // Memoized unique values for filters
   const { categories, statuses } = useMemo(() => ({
     statuses: [...new Set(salesData.map(item => item.status))]
@@ -39,7 +72,7 @@ const SalesReport = () => {
       if (filters.search) {
         const searchLower = filters.search.toLowerCase();
         const found = Object.values(item).some(val => 
-          val.toString().toLowerCase().includes(searchLower)
+          val?.toString?.().toLowerCase().includes(searchLower)
         );
         if (!found) return false;
       }
@@ -172,6 +205,13 @@ const SalesReport = () => {
     }
   }, [filteredAndSortedData]);
 
+  const InsightBadge = ({ label, value }) => (
+    <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-200 text-sm flex items-center justify-between">
+      <span className="text-gray-600">{label}</span>
+      <span className="font-semibold text-gray-900">{value}</span>
+    </div>
+  );
+
   return (
     <div className="h-full w-full bg-gray-50">
       <div className="h-full flex flex-col">
@@ -184,12 +224,49 @@ const SalesReport = () => {
           summaryStats={summaryStats}
         />
 
-        {/* < SalesReportWithNotifications
-          summaryStats={summaryStats}
-          onNotificationChange={(settings) => {
-           // Handle notification settings change
-            console.log('Settings updated:', settings);
-          }}/> */}
+        {/* AI Insights */}
+        {insights && (
+          <div className="px-6 py-4 bg-white border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">AI Insights</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">Top Products by Interest</p>
+                {(insights.topProductsByInterest || []).slice(0,5).map((p, i) => (
+                  <InsightBadge key={i} label={p.product} value={`${p.count} intents`} />
+                ))}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">Top Products by Revenue</p>
+                {(insights.topProductsByRevenue || []).slice(0,5).map((p, i) => (
+                  <InsightBadge key={i} label={p.product} value={`$${Number(p.amount||0).toFixed(2)}`} />
+                ))}
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">What’s Blocking Sales</p>
+                {insights.blockers && (
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(insights.blockers).map(([k,v]) => (
+                      <InsightBadge key={k} label={k} value={v} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="mt-4">
+              <p className="text-sm text-gray-600 mb-2">Personalized Recommendations</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-gray-800">
+                {(insights.recommendations || []).map((r, i) => (<li key={i}>{r}</li>))}
+              </ul>
+            </div>
+            <div className="mt-3">
+              <p className="text-sm text-gray-600 mb-1">Company-level Suggestions</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-gray-800">
+                {(insights.companySuggestions || []).map((r, i) => (<li key={i}>{r}</li>))}
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* Filters and Search */}
         <FilterSection
           filters={filters}
