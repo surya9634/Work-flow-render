@@ -827,7 +827,8 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
           const text = String(campaign?.message?.initialMessage || '').trim() || `Hi! This is ${campaign?.persona?.name || 'our team'} from ${makeCampaignNameFromDescription(campaign?.brief?.description || '')}. How can we help you today?`;
           await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
             recipient: { id: fbConvParticipants.get(fbThreadId) },
-            message: { text: text.slice(0, 900) }
+            message: { text: text.slice(0, 900) },
+            messaging_type: 'RESPONSE'
           }, { params: { access_token: config.facebook.pageToken } });
 
           // Emit to frontend and mark conversationId
@@ -1162,7 +1163,23 @@ app.post('/api/messenger/send-message', async (req, res) => {
       }
       if (!recipientId) return res.status(400).json({ error: 'Could not resolve participant PSID for conversation' });
       const url = `https://graph.facebook.com/v21.0/me/messages`;
-      await axios.post(url, { recipient: { id: recipientId }, message: { text } }, { params: { access_token: config.facebook.pageToken } });
+      const body = {
+        recipient: { id: recipientId },
+        message: { text: String(text).slice(0, 900) },
+        messaging_type: 'RESPONSE'
+      };
+      // Allow sending outside 24h with a permitted tag
+      if (req.body && typeof req.body.tag === 'string' && req.body.tag.trim()) {
+        body.messaging_type = 'MESSAGE_TAG';
+        body.tag = req.body.tag.trim(); // e.g., CONFIRMED_EVENT_UPDATE, POST_PURCHASE_UPDATE, ACCOUNT_UPDATE, HUMAN_AGENT
+      }
+      try {
+        await axios.post(url, body, { params: { access_token: config.facebook.pageToken } });
+      } catch (fbErr) {
+        console.error('FB send error:', serializeError(fbErr));
+        const resp = fbErr?.response?.data || {};
+        return res.status(400).json({ error: 'fb_send_failed', details: resp });
+      }
       const nowIso = new Date().toISOString();
       const msg = { id: 'm_' + Date.now(), sender: senderNorm, text, timestamp: nowIso };
       // persist
@@ -1736,7 +1753,8 @@ app.post('/webhook', async (req, res) => {
                   // Send reply via FB API
                   await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
                     recipient: { id: senderId },
-                    message: { text: reply.slice(0, 900) }
+                    message: { text: reply.slice(0, 900) },
+                    messaging_type: 'RESPONSE'
                   }, { params: { access_token: config.facebook.pageToken } });
                   const aiNow = new Date().toISOString();
                   // Persist AI reply for FB, compute response time
