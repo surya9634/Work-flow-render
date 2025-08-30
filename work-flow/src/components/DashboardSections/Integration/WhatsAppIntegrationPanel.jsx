@@ -1,6 +1,91 @@
 import React, { useEffect, useState } from 'react';
 import WhatsAppSetupGuide from './WhatsAppSetupGuide';
 
+// Inline controls for registration/config without cluttering UI
+const RegisterControls = () => {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [creds, setCreds] = useState({ token: '', phoneNumberId: '', mode: 'test' });
+  const [codeMethod, setCodeMethod] = useState('SMS');
+  const [language, setLanguage] = useState('en');
+  const [code, setCode] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const saveCreds = async () => {
+    setSaving(true); setMsg('');
+    try {
+      const resp = await fetch(`${window.location.origin}/api/integrations/whatsapp/config`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(creds)
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error(data.message || 'save_failed');
+      setMsg('Saved');
+    } catch (e) {
+      setMsg('Save failed');
+    } finally { setSaving(false); }
+  };
+
+  const requestCode = async () => {
+    setSaving(true); setMsg('');
+    try {
+      const resp = await fetch(`${window.location.origin}/api/whatsapp/request-code`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codeMethod, language })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error('request_failed');
+      setMsg('Code sent');
+    } catch { setMsg('Request failed'); } finally { setSaving(false); }
+  };
+
+  const verifyCode = async () => {
+    setSaving(true); setMsg('');
+    try {
+      const resp = await fetch(`${window.location.origin}/api/whatsapp/verify-code`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.success) throw new Error('verify_failed');
+      setMsg('Verified');
+    } catch { setMsg('Verify failed'); } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="relative">
+      <button onClick={() => setOpen(v=>!v)} className="text-xs px-2 py-1 border rounded">Register</button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-2 w-80 bg-white border rounded shadow p-3 space-y-2">
+          <div className="text-xs text-gray-700 font-medium">WhatsApp Config</div>
+          <input placeholder="Token" className="w-full px-2 py-1 border rounded" value={creds.token} onChange={e=>setCreds({...creds, token: e.target.value})} />
+          <input placeholder="Phone Number ID" className="w-full px-2 py-1 border rounded" value={creds.phoneNumberId} onChange={e=>setCreds({...creds, phoneNumberId: e.target.value})} />
+          <select className="w-full px-2 py-1 border rounded" value={creds.mode} onChange={e=>setCreds({...creds, mode: e.target.value})}>
+            <option value="test">Test</option>
+            <option value="production">Production</option>
+          </select>
+          <button onClick={saveCreds} disabled={saving} className="w-full text-xs px-2 py-1 bg-gray-900 text-white rounded">{saving? 'Saving…':'Save'}</button>
+          <div className="h-px bg-gray-200" />
+          <div className="text-xs text-gray-700 font-medium">Request Code (Prod)</div>
+          <div className="flex gap-2">
+            <select className="flex-1 px-2 py-1 border rounded" value={codeMethod} onChange={e=>setCodeMethod(e.target.value)}>
+              <option>SMS</option>
+              <option>VOICE</option>
+            </select>
+            <input placeholder="lang (en)" className="w-24 px-2 py-1 border rounded" value={language} onChange={e=>setLanguage(e.target.value)} />
+          </div>
+          <button onClick={requestCode} disabled={saving} className="w-full text-xs px-2 py-1 border rounded">Send Code</button>
+          <div className="flex gap-2 items-center">
+            <input placeholder="123456" className="flex-1 px-2 py-1 border rounded" value={code} onChange={e=>setCode(e.target.value)} />
+            <button onClick={verifyCode} disabled={saving} className="text-xs px-2 py-1 border rounded">Verify</button>
+          </div>
+          {!!msg && <div className="text-xs text-gray-600">{msg}</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const WhatsAppIntegrationPanel = () => {
   const [status, setStatus] = useState({ connected: false, phoneNumberId: null, mode: 'test' });
   const [test, setTest] = useState({ phoneNumber: '', message: 'Hello from Work-Flow!', mode: 'test' });
@@ -68,7 +153,10 @@ const WhatsAppIntegrationPanel = () => {
       {/* <WhatsAppSetupGuide /> */}
 
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h4 className="font-medium text-gray-900 mb-2">Send WhatsApp Message</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-medium text-gray-900">Send WhatsApp Message</h4>
+          <RegisterControls />
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm text-gray-600 mb-1">Recipient Phone (E.164, digits only)</label>

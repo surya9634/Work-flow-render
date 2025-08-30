@@ -2085,6 +2085,44 @@ app.get('/api/whatsapp/diagnose', async (_req, res) => {
   }
 });
 
+// WhatsApp registration: request verification code (production number)
+app.post('/api/whatsapp/request-code', async (req, res) => {
+  try {
+    const { codeMethod, language } = req.body || {};
+    const { token, phoneNumberId } = getWhatsappCreds('production');
+    if (!token || !phoneNumberId) return res.status(400).json({ success: false, message: 'whatsapp_not_configured' });
+    const payload = { code_method: (codeMethod === 'VOICE' ? 'VOICE' : 'SMS'), language: String(language || 'en') };
+    const resp = await axios.post(`https://graph.facebook.com/v23.0/${phoneNumberId}/request_code`, payload, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    return res.json({ success: true, result: resp.data });
+  } catch (err) {
+    console.error('WA request_code error:', serializeError(err));
+    const status = (err && err.response && err.response.status) || 500;
+    const fbErr = err && err.response && err.response.data && err.response.data.error;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: 'request_code_failed', details: fbErr });
+  }
+});
+
+// WhatsApp registration: verify code (production number)
+app.post('/api/whatsapp/verify-code', async (req, res) => {
+  try {
+    const { code } = req.body || {};
+    if (!code) return res.status(400).json({ success: false, message: 'code required' });
+    const { token, phoneNumberId } = getWhatsappCreds('production');
+    if (!token || !phoneNumberId) return res.status(400).json({ success: false, message: 'whatsapp_not_configured' });
+    const resp = await axios.post(`https://graph.facebook.com/v23.0/${phoneNumberId}/verify_code`, { code: String(code) }, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+    });
+    return res.json({ success: true, result: resp.data });
+  } catch (err) {
+    console.error('WA verify_code error:', serializeError(err));
+    const status = (err && err.response && err.response.status) || 500;
+    const fbErr = err && err.response && err.response.data && err.response.data.error;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({ success: false, error: 'verify_code_failed', details: fbErr });
+  }
+});
+
 // Serve frontend build (Vite) from work-flow/dist
 const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
 // Serve frontend build (Vite) with caching and correct content types
