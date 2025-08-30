@@ -57,25 +57,18 @@ const WhatsAppIntegrationPanel = () => {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">WhatsApp Integration</h3>
         <div className="flex items-center gap-3">
-          <button onClick={runDiagnose} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded disabled:opacity-50" disabled={diag.running}>
-            {diag.running ? 'Diagnosing…' : 'Diagnose'}
-          </button>
+
           <span className={`px-2 py-1 text-xs rounded ${status.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
             {status.connected ? `Connected (Phone ID: ${status.phoneNumberId || '—'})` : 'Not Connected'}
           </span>
         </div>
       </div>
 
-      {diag.data && (
-        <div className={`text-xs mb-2 ${diag.data.success ? 'text-green-700' : 'text-red-700'}`}>
-          {diag.data.success ? 'Diagnosis OK' : `Issues: ${(diag.data.issues || []).join(', ') || 'unknown'}`}
-        </div>
-      )}
-
-      <WhatsAppSetupGuide />
+      {/* hidden diagnose banner and setup guide for cleaner UI */}
+      {/* <WhatsAppSetupGuide /> */}
 
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h4 className="font-medium text-gray-900 mb-2">Send Test Message</h4>
+        <h4 className="font-medium text-gray-900 mb-2">Send WhatsApp Message</h4>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm text-gray-600 mb-1">Recipient Phone (E.164, digits only)</label>
