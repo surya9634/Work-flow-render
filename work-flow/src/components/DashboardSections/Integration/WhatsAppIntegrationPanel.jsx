@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import WhatsAppSetupGuide from './WhatsAppSetupGuide';
 
 const WhatsAppIntegrationPanel = () => {
-  const [status, setStatus] = useState({ connected: false, phoneNumberId: null });
-  const [test, setTest] = useState({ phoneNumber: '', message: 'Hello from Work-Flow!' });
+  const [status, setStatus] = useState({ connected: false, phoneNumberId: null, mode: 'test' });
+  const [test, setTest] = useState({ phoneNumber: '', message: 'Hello from Work-Flow!', mode: 'test' });
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
   const [diag, setDiag] = useState({ running: false, data: null });
@@ -37,7 +37,7 @@ const WhatsAppIntegrationPanel = () => {
       const resp = await fetch(`${window.location.origin}/api/whatsapp/send-message`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber: String(test.phoneNumber || '').replace(/\D/g, ''), message: test.message })
+        body: JSON.stringify({ phoneNumber: String(test.phoneNumber || '').replace(/\D/g, ''), message: test.message, mode: test.mode })
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -76,7 +76,7 @@ const WhatsAppIntegrationPanel = () => {
 
       <div className="bg-white rounded-xl border border-gray-200 p-4">
         <h4 className="font-medium text-gray-900 mb-2">Send Test Message</h4>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
             <label className="block text-sm text-gray-600 mb-1">Recipient Phone (E.164, digits only)</label>
             <input type="text" value={test.phoneNumber} onChange={e=>setTest({...test, phoneNumber: e.target.value})} placeholder="15551234567" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
@@ -84,6 +84,13 @@ const WhatsAppIntegrationPanel = () => {
           <div className="md:col-span-2">
             <label className="block text-sm text-gray-600 mb-1">Message</label>
             <input type="text" value={test.message} onChange={e=>setTest({...test, message: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">Mode</label>
+            <select value={test.mode} onChange={e=>setTest({...test, mode: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              <option value="test">Test</option>
+              <option value="production">Production</option>
+            </select>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-3">
