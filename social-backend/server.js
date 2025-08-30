@@ -34,8 +34,10 @@ const config = {
   },
   whatsapp: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    testPhoneNumberId: process.env.WHATSAPP_TEST_PHONE_NUMBER_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'verify-me',
     token: process.env.WHATSAPP_TOKEN || process.env.FB_PAGE_TOKEN || process.env.PAGE_ACCESS_TOKEN || '',
+    testToken: process.env.WHATSAPP_TEST_TOKEN || '',
     mode: (process.env.WHATSAPP_MODE || 'production').toLowerCase() === 'test' ? 'test' : 'production' // 'test' | 'production'
   },
   webhook: {
@@ -46,6 +48,14 @@ const config = {
     autoReplyWebhook: String(process.env.AI_AUTO_REPLY_WEBHOOK || '').toLowerCase() === 'true'
   }
 };
+
+// Helper to choose WhatsApp credentials by mode
+function getWhatsappCreds(preferredMode) {
+  const m = (preferredMode || config.whatsapp.mode) === 'test' ? 'test' : 'production';
+  const token = m === 'test' ? (config.whatsapp.testToken || config.whatsapp.token) : config.whatsapp.token;
+  const phoneNumberId = m === 'test' ? (config.whatsapp.testPhoneNumberId || config.whatsapp.phoneNumberId) : config.whatsapp.phoneNumberId;
+  return { mode: m, token, phoneNumberId };
+}
 
 console.log('🚀 Starting Work Automation Platform');
 console.log('=====================================');
@@ -1219,15 +1229,19 @@ app.post('/api/messenger/send-message', async (req, res) => {
     }
 
     // WhatsApp outbound via Cloud API
-    if (String(conversationId).startsWith('wa_') && config.whatsapp.token && config.whatsapp.phoneNumberId) {
+    if (String(conversationId).startsWith('wa_')) {
       const toPhone = String(conversationId).slice(3);
+      const { token, phoneNumberId, mode: waMode } = getWhatsappCreds(req.body?.mode);
+      if (!token || !phoneNumberId) {
+        return res.status(400).json({ error: 'whatsapp_not_configured' });
+      }
       try {
-        await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+        await axios.post(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
           messaging_product: 'whatsapp',
           to: toPhone,
           type: 'text',
           text: { body: String(text).slice(0, 900) }
-        }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
+        }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-WA-Mode': waMode } });
       } catch (waSendErr) {
         console.error('WA outbound send error:', serializeError(waSendErr));
       }
@@ -1822,19 +1836,21 @@ app.post('/webhook', async (req, res) => {
             io.emit('messenger:message_created', { conversationId: convId, message: msg });
 
             // AI auto-reply if enabled (and AI mode ON for this conversation)
-            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && config.whatsapp.token && config.whatsapp.phoneNumberId && (aiModeByConversation.get(convId) === true)) {
+            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(convId) === true)) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
                 const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
                 const reply = await generateWithGemini(String(text || ''), baseSystem);
                 if (reply) {
-                  // Send reply via WhatsApp Cloud API
-                  await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+                  // Send reply via WhatsApp Cloud API using selected mode
+                  const { token, phoneNumberId, mode: waMode } = getWhatsappCreds();
+                  if (!token || !phoneNumberId) throw new Error('whatsapp_not_configured');
+                  await axios.post(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
                     messaging_product: 'whatsapp',
                     to: m.from,
                     type: 'text',
                     text: { body: reply.slice(0, 900) }
-                  }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
+                  }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-WA-Mode': waMode } });
 
                   const aiNow = new Date().toISOString();
                   const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
@@ -1997,16 +2013,17 @@ app.post('/api/integrations/whatsapp/config', (req, res) => {
 // Send outbound WhatsApp message via Cloud API (manual send from UI)
 app.post('/api/whatsapp/send-message', async (req, res) => {
   try {
-    const { phoneNumber, message } = req.body || {};
+    const { phoneNumber, message, mode } = req.body || {};
     if (!phoneNumber || !message) return res.status(400).json({ error: 'Missing required fields' });
-    if (!config.whatsapp.phoneNumberId || !config.whatsapp.token) return res.status(400).json({ error: 'whatsapp_not_configured' });
-    const resp = await axios.post(`https://graph.facebook.com/v23.0/${config.whatsapp.phoneNumberId}/messages`, {
+    const { token, phoneNumberId, mode: waMode } = getWhatsappCreds(mode);
+    if (!phoneNumberId || !token) return res.status(400).json({ error: 'whatsapp_not_configured' });
+    const resp = await axios.post(`https://graph.facebook.com/v23.0/${phoneNumberId}/messages`, {
       messaging_product: 'whatsapp',
       to: phoneNumber,
       type: 'text',
       text: { body: String(message).slice(0, 900) }
-    }, { headers: { Authorization: `Bearer ${config.whatsapp.token}`, 'Content-Type': 'application/json' } });
-    return res.json({ success: true, result: resp.data });
+    }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-WA-Mode': waMode } });
+    return res.json({ success: true, result: resp.data, mode: waMode });
   } catch (err) {
     console.error('WA send error:', serializeError(err));
     const status = (err && err.response && err.response.status) || 500;
