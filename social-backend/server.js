@@ -1997,7 +1997,7 @@ app.post('/api/whatsapp/send-message', async (req, res) => {
     const { phoneNumber, message } = req.body || {};
     if (!phoneNumber || !message) return res.status(400).json({ error: 'Missing required fields' });
     if (!config.whatsapp.phoneNumberId || !config.whatsapp.token) return res.status(400).json({ error: 'whatsapp_not_configured' });
-    const resp = await axios.post(`https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}/messages`, {
+    const resp = await axios.post(`https://graph.facebook.com/v23.0/${config.whatsapp.phoneNumberId}/messages`, {
       messaging_product: 'whatsapp',
       to: phoneNumber,
       type: 'text',
@@ -2006,7 +2006,56 @@ app.post('/api/whatsapp/send-message', async (req, res) => {
     return res.json({ success: true, result: resp.data });
   } catch (err) {
     console.error('WA send error:', serializeError(err));
-    return res.status(500).json({ error: 'whatsapp_send_failed' });
+    const status = (err && err.response && err.response.status) || 500;
+    const fbErr = err && err.response && err.response.data && err.response.data.error;
+    return res.status(status >= 400 && status < 600 ? status : 500).json({
+      error: 'whatsapp_send_failed',
+      details: fbErr ? { message: fbErr.message, code: fbErr.code, subcode: fbErr.error_subcode } : undefined
+    });
+  }
+});
+
+// Diagnose WhatsApp Cloud API configuration and linkage
+app.get('/api/whatsapp/diagnose', async (_req, res) => {
+  try {
+    if (!config.whatsapp.phoneNumberId || !config.whatsapp.token) {
+      return res.status(400).json({ success: false, issues: ['whatsapp_not_configured'] });
+    }
+    const issues = [];
+    const headers = { Authorization: `Bearer ${config.whatsapp.token}` };
+    let pnInfo = null;
+    let wabaId = null;
+    let wabaNumbers = null;
+    // 1) Fetch phone number details and owning WABA id
+    try {
+      pnInfo = await axios.get(`https://graph.facebook.com/v23.0/${config.whatsapp.phoneNumberId}?fields=id,display_phone_number,verified_name,whatsapp_business_account`, { headers });
+      wabaId = pnInfo?.data?.whatsapp_business_account?.id || null;
+      if (!wabaId) issues.push('no_waba_for_phone_number');
+    } catch (e) {
+      issues.push('phone_number_lookup_failed');
+    }
+    // 2) If WABA present, list its phone numbers to confirm membership
+    if (wabaId) {
+      try {
+        const resp = await axios.get(`https://graph.facebook.com/v23.0/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`, { headers });
+        wabaNumbers = resp?.data?.data || null;
+        const inWaba = Array.isArray(wabaNumbers) && wabaNumbers.some(n => String(n.id) === String(config.whatsapp.phoneNumberId));
+        if (!inWaba) issues.push('phone_number_not_in_waba');
+      } catch (e) {
+        issues.push('waba_numbers_lookup_failed');
+      }
+    }
+    return res.json({
+      success: issues.length === 0,
+      phoneNumberId: config.whatsapp.phoneNumberId,
+      phoneNumberInfo: pnInfo && pnInfo.data ? pnInfo.data : null,
+      wabaId,
+      wabaNumbers,
+      issues
+    });
+  } catch (err) {
+    console.error('WA diagnose error:', serializeError(err));
+    return res.status(500).json({ success: false, issues: ['diagnose_failed'] });
   }
 });
 

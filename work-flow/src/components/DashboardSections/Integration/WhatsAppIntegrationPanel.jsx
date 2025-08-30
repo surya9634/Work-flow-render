@@ -6,6 +6,18 @@ const WhatsAppIntegrationPanel = () => {
   const [test, setTest] = useState({ phoneNumber: '', message: 'Hello from Work-Flow!' });
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null);
+  const [diag, setDiag] = useState({ running: false, data: null });
+
+  const runDiagnose = async () => {
+    setDiag({ running: true, data: null });
+    try {
+      const r = await fetch(`${window.location.origin}/api/whatsapp/diagnose`);
+      const d = await r.json();
+      setDiag({ running: false, data: { ok: r.ok, ...d } });
+    } catch (_) {
+      setDiag({ running: false, data: { ok: false, issues: ['diagnose_call_failed'] } });
+    }
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -28,7 +40,10 @@ const WhatsAppIntegrationPanel = () => {
         body: JSON.stringify({ phoneNumber: String(test.phoneNumber || '').replace(/\D/g, ''), message: test.message })
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || 'Send failed');
+      if (!resp.ok) {
+        const detail = data?.details ? ` (${data.details.message || ''}${data.details.code ? `, code ${data.details.code}` : ''}${data.details.subcode ? `/${data.details.subcode}` : ''})` : '';
+        throw new Error((data?.error || 'Send failed') + detail);
+      }
       setResult({ ok: true, data });
     } catch (e) {
       setResult({ ok: false, error: String(e.message || e) });
@@ -41,10 +56,21 @@ const WhatsAppIntegrationPanel = () => {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">WhatsApp Integration</h3>
-        <span className={`px-2 py-1 text-xs rounded ${status.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-          {status.connected ? `Connected (Phone ID: ${status.phoneNumberId || '—'})` : 'Not Connected'}
-        </span>
+        <div className="flex items-center gap-3">
+          <button onClick={runDiagnose} className="px-2 py-1 text-xs bg-indigo-600 text-white rounded disabled:opacity-50" disabled={diag.running}>
+            {diag.running ? 'Diagnosing…' : 'Diagnose'}
+          </button>
+          <span className={`px-2 py-1 text-xs rounded ${status.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+            {status.connected ? `Connected (Phone ID: ${status.phoneNumberId || '—'})` : 'Not Connected'}
+          </span>
+        </div>
       </div>
+
+      {diag.data && (
+        <div className={`text-xs mb-2 ${diag.data.success ? 'text-green-700' : 'text-red-700'}`}>
+          {diag.data.success ? 'Diagnosis OK' : `Issues: ${(diag.data.issues || []).join(', ') || 'unknown'}`}
+        </div>
+      )}
 
       <WhatsAppSetupGuide />
 
