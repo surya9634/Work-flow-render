@@ -18,7 +18,7 @@ import UserProfile from '../components/DashboardSections/UserProfile/UserProfile
 import Analytics from '../components/DashboardSections/Analytics/AnalyticsDashboard/Analytics';
 import AIFineTuning from '../components/DashboardSections/AIFineTuning/AIFineTuning';
 import Integration from '../components/DashboardSections/Integration/Integration';
-import SalesReport from '../components/DashboardSections/SalesReport/SalesReport';
+
 import Navbar from '../components/Navbar/Navbar';
 import Chats from '../components/DashboardSections/Chats/Chats';
 import SignOutModal from '../components/SignOutModal';
@@ -38,7 +38,6 @@ const WorkFlowDashboard = () => {
     { icon: Share2, label: 'Integration', path: 'integration' },
     { icon: MessagesSquare, label: 'Chats', path: 'chats' },
     { icon: FileText, label: 'AI Counsellor', path: 'ai-counsellor' },
-    { icon: FileText, label: 'Sales & Reports', path: 'sales-reports' },
   ];
 
   // Get active section from current path
@@ -166,7 +165,6 @@ const WorkFlowDashboard = () => {
             <Route path="/integration" element={<Integration />} />
             <Route path="/chats" element={<Chats />} />
             <Route path="/ai-counsellor" element={<AICounsellor />} />
-            <Route path="/sales-reports" element={<SalesReport />} />
             <Route path="*" element={<Navigate to="/dashboard/profile" replace />} />
           </Routes>
         </main>
