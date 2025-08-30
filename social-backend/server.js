@@ -35,7 +35,8 @@ const config = {
   whatsapp: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || 'verify-me',
-    token: process.env.WHATSAPP_TOKEN || process.env.FB_PAGE_TOKEN || process.env.PAGE_ACCESS_TOKEN || ''
+    token: process.env.WHATSAPP_TOKEN || process.env.FB_PAGE_TOKEN || process.env.PAGE_ACCESS_TOKEN || '',
+    mode: (process.env.WHATSAPP_MODE || 'production').toLowerCase() === 'test' ? 'test' : 'production' // 'test' | 'production'
   },
   webhook: {
     verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || 'WORKFLOW_VERIFY_TOKEN',
@@ -1970,6 +1971,7 @@ app.get('/api/integrations/whatsapp/config', (_req, res) => {
         verifyTokenSet: Boolean(config.whatsapp.verifyToken),
         tokenMasked,
         callbackUrl,
+        mode: config.whatsapp.mode || 'production'
       }
     });
   } catch (e) {
@@ -1980,12 +1982,13 @@ app.get('/api/integrations/whatsapp/config', (_req, res) => {
 // Save WhatsApp credentials from UI (in-memory for runtime)
 app.post('/api/integrations/whatsapp/config', (req, res) => {
   try {
-    const { token, phoneNumberId, verifyToken } = req.body || {};
+    const { token, phoneNumberId, verifyToken, mode } = req.body || {};
     if (!token || !phoneNumberId) return res.status(400).json({ success: false, message: 'token and phoneNumberId required' });
     config.whatsapp.token = String(token);
     config.whatsapp.phoneNumberId = String(phoneNumberId);
     if (verifyToken) config.whatsapp.verifyToken = String(verifyToken);
-    return res.json({ success: true, whatsapp: { connected: true, phoneNumberId: config.whatsapp.phoneNumberId, verifyTokenSet: Boolean(config.whatsapp.verifyToken) } });
+    if (mode && (mode === 'test' || mode === 'production')) config.whatsapp.mode = mode;
+    return res.json({ success: true, whatsapp: { connected: true, phoneNumberId: config.whatsapp.phoneNumberId, verifyTokenSet: Boolean(config.whatsapp.verifyToken), mode: config.whatsapp.mode } });
   } catch (e) {
     return res.status(500).json({ success: false, message: 'internal_error' });
   }
@@ -2026,16 +2029,17 @@ app.get('/api/whatsapp/diagnose', async (_req, res) => {
     let pnInfo = null;
     let wabaId = null;
     let wabaNumbers = null;
+    const mode = config.whatsapp.mode || 'production';
     // 1) Fetch phone number details and owning WABA id
     try {
       pnInfo = await axios.get(`https://graph.facebook.com/v23.0/${config.whatsapp.phoneNumberId}?fields=id,display_phone_number,verified_name,whatsapp_business_account`, { headers });
       wabaId = pnInfo?.data?.whatsapp_business_account?.id || null;
-      if (!wabaId) issues.push('no_waba_for_phone_number');
+      if (!wabaId && mode === 'production') issues.push('no_waba_for_phone_number');
     } catch (e) {
       issues.push('phone_number_lookup_failed');
     }
-    // 2) If WABA present, list its phone numbers to confirm membership
-    if (wabaId) {
+    // 2) If WABA present, list its phone numbers to confirm membership (prod only)
+    if (wabaId && mode === 'production') {
       try {
         const resp = await axios.get(`https://graph.facebook.com/v23.0/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`, { headers });
         wabaNumbers = resp?.data?.data || null;
@@ -2045,12 +2049,17 @@ app.get('/api/whatsapp/diagnose', async (_req, res) => {
         issues.push('waba_numbers_lookup_failed');
       }
     }
+    // 3) In test mode, remind to use test recipients
+    if (mode === 'test') {
+      issues.push('test_mode_reminder_add_test_recipients');
+    }
     return res.json({
       success: issues.length === 0,
       phoneNumberId: config.whatsapp.phoneNumberId,
       phoneNumberInfo: pnInfo && pnInfo.data ? pnInfo.data : null,
       wabaId,
       wabaNumbers,
+      mode,
       issues
     });
   } catch (err) {

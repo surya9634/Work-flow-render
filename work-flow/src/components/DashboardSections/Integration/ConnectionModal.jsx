@@ -62,7 +62,7 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
         const resp = await fetch(`${window.location.origin}/api/integrations/whatsapp/config`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token: formData.apiKey, phoneNumberId: formData.phoneNumberId, verifyToken: formData.verifyToken })
+          body: JSON.stringify({ token: formData.apiKey, phoneNumberId: formData.phoneNumberId, verifyToken: formData.verifyToken, mode: formData.mode || 'production' })
         });
         if (!resp.ok) throw new Error('Failed to save WhatsApp config');
       }
@@ -70,7 +70,8 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
       const connectionData = {
         platform,
         connectionType,
-        ...formData
+        ...formData,
+        mode: formData.mode || 'production'
       };
 
       onSave(connectionData);
@@ -125,6 +126,22 @@ const ConnectionModal = ({ platform, editingConnection, onClose, onSave }) => {
                   placeholder="your webhook verify token"
                 />
                 <p className="text-xs text-gray-500 mt-1">Use the same token when configuring the WhatsApp webhook subscription.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Number Type</label>
+                <select
+                  value={formData.mode || 'production'}
+                  onChange={(e) => setFormData({ ...formData, mode: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="production">Normal (Production)</option>
+                  <option value="test">Meta Test Number</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  - Normal: registered business number with Phone Number ID and a system-user token assigned to the same WABA.
+                  <br />
+                  - Test: use Getting Started test number and add recipients to Test Recipients list.
+                </p>
               </div>
             </div>
           );
