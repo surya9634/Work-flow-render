@@ -5,6 +5,7 @@ import AutomationCard from './AutomationCard';
 import ConnectionModal from './ConnectionModal';
 import AutomationModal from './AutomationModal';
 import { platforms } from '../../data/platformData';
+import WhatsAppIntegrationPanel from './WhatsAppIntegrationPanel';
 
 const Integration  = () => {
   const [connectedAccounts, setConnectedAccounts] = useState([]);
@@ -172,6 +173,12 @@ const Integration  = () => {
               ))}
             </div>
           )}
+        </div>
+
+        {/* WhatsApp Integration deep-dive panel */}
+        <div className="mb-12">
+          <h2 className="text-xl font-semibold text-gray-900 mb-3">WhatsApp Automation & Setup</h2>
+          <WhatsAppIntegrationPanel />
         </div>
 
         {/* Automations Section */}

@@ -1961,6 +1961,7 @@ app.get('/api/integrations/whatsapp/config', (_req, res) => {
   try {
     const hasToken = Boolean(config.whatsapp.token);
     const tokenMasked = hasToken ? `${config.whatsapp.token.slice(0, 6)}...${config.whatsapp.token.slice(-4)}` : null;
+    const callbackUrl = (process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/webhook` : 'http://localhost:10000/webhook');
     return res.json({
       success: true,
       whatsapp: {
@@ -1968,6 +1969,7 @@ app.get('/api/integrations/whatsapp/config', (_req, res) => {
         phoneNumberId: config.whatsapp.phoneNumberId || '',
         verifyTokenSet: Boolean(config.whatsapp.verifyToken),
         tokenMasked,
+        callbackUrl,
       }
     });
   } catch (e) {

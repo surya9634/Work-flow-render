@@ -1,0 +1,79 @@
+import React, { useEffect, useState } from 'react';
+import WhatsAppSetupGuide from './WhatsAppSetupGuide';
+
+const WhatsAppIntegrationPanel = () => {
+  const [status, setStatus] = useState({ connected: false, phoneNumberId: null });
+  const [test, setTest] = useState({ phoneNumber: '', message: 'Hello from Work-Flow!' });
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`${window.location.origin}/api/integrations/status`);
+        const data = await res.json();
+        if (!ignore && res.ok) setStatus(data.whatsapp || { connected: false });
+      } catch {}
+    })();
+    return () => { ignore = true; };
+  }, []);
+
+  const sendTest = async () => {
+    setSending(true); setResult(null);
+    try {
+      const resp = await fetch(`${window.location.origin}/api/whatsapp/send-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber: String(test.phoneNumber || '').replace(/\D/g, ''), message: test.message })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'Send failed');
+      setResult({ ok: true, data });
+    } catch (e) {
+      setResult({ ok: false, error: String(e.message || e) });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold text-gray-900">WhatsApp Integration</h3>
+        <span className={`px-2 py-1 text-xs rounded ${status.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+          {status.connected ? `Connected (Phone ID: ${status.phoneNumberId || '—'})` : 'Not Connected'}
+        </span>
+      </div>
+
+      <WhatsAppSetupGuide />
+
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <h4 className="font-medium text-gray-900 mb-2">Send Test Message</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label className="block text-sm text-gray-600 mb-1">Recipient Phone (E.164, digits only)</label>
+            <input type="text" value={test.phoneNumber} onChange={e=>setTest({...test, phoneNumber: e.target.value})} placeholder="15551234567" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm text-gray-600 mb-1">Message</label>
+            <input type="text" value={test.message} onChange={e=>setTest({...test, message: e.target.value})} className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <button onClick={sendTest} disabled={sending} className="px-4 py-2 bg-green-600 text-white rounded-lg disabled:opacity-50">
+            {sending ? 'Sending…' : 'Send Test via WhatsApp'}
+          </button>
+          {result && (
+            <span className={`text-sm ${result.ok ? 'text-green-700' : 'text-red-700'}`}>
+              {result.ok ? 'Sent!' : `Failed: ${result.error}`}
+            </span>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-gray-500">Note: Requires your Access Token, Phone Number ID and Webhook to be set and connected.</p>
+      </div>
+    </div>
+  );
+};
+
+export default WhatsAppIntegrationPanel;
