@@ -20,6 +20,7 @@ function InstagramChat() {
   const [statusFilter, setStatusFilter] = useState('All');
   const [aiMode, setAiMode] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(true);
+  const [manualRecipient, setManualRecipient] = useState('');
 
   // OAuth URL (provided)
   const IG_OAUTH_URL = 'https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=1477959410285896&redirect_uri=https://work-flow-render.onrender.com/auth/instagram/callback&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights';
@@ -67,19 +68,23 @@ function InstagramChat() {
     if (activeChat) updateChatLastMessage(activeChat.id, text, newMsg.time);
     // Send to backend if username present and userId set
     try {
-      if (userId && activeChat?.name) {
+      const rawUsername = activeChat?.name || manualRecipient;
+      const username = String(rawUsername || '').trim().replace(/^@+/, '');
+      if (userId && username) {
         const resp = await apiFetch('/api/instagram/send-dm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId, username: activeChat.name, message: text })
+          body: JSON.stringify({ userId, username, message: text })
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || data?.error) {
           throw new Error(data?.error || 'Send failed');
         }
-        toast.success('Sent via Instagram');
+        toast.success(`Sent to @${username}`);
+      } else if (!userId) {
+        toast('Connect Instagram first', { icon: 'ℹ️' });
       } else {
-        toast('Connect IG and select a username from comments to DM', { icon: 'ℹ️' });
+        toast('Enter a username to DM', { icon: 'ℹ️' });
       }
     } catch (e) {
       toast.error(e.message || 'Failed to send');
@@ -166,6 +171,12 @@ function InstagramChat() {
               value={userId}
               onChange={e => setUserId(e.target.value)}
             />
+            <input
+              className="w-full border rounded px-2 py-1 text-sm"
+              placeholder="Recipient username (e.g., @creator)"
+              value={manualRecipient}
+              onChange={e => setManualRecipient(e.target.value)}
+            />
             <div className="flex items-center gap-2">
               <button onClick={fetchPosts} className="px-2 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50" disabled={!userId || loadingPosts}>
                 {loadingPosts ? 'Fetching…' : 'Fetch Posts'}
@@ -195,7 +206,7 @@ function InstagramChat() {
                     <div key={c.id} className="text-xs text-gray-800 flex items-start gap-2">
                       <div className="font-medium">@{c.username}</div>
                       <div className="flex-1">{c.text}</div>
-                      <button onClick={() => setActiveChat({ id: c.username, name: c.username, lastMessage: '', time: '' })} className="text-[10px] px-2 py-0.5 border rounded">DM</button>
+                      <button onClick={() => setActiveChat({ id: c.username || c.id, name: (c.username || '').trim().replace(/^@+/, '') || manualRecipient, lastMessage: '', time: '' })} className="text-[10px] px-2 py-0.5 border rounded">DM</button>
                     </div>
                   ))}
                 </div>
