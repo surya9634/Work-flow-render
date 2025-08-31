@@ -223,11 +223,11 @@ function InstagramChat() {
         {/* Chat List */}
         <div className="flex-1 overflow-hidden">
           <ChatList
-            chats={chats}
+            chats={Array.isArray(chats) ? chats : []}
             activeChat={activeChat}
             onChatSelect={setActiveChat}
-            searchTerm={searchTerm}
-            statusFilter={statusFilter}
+            searchTerm={searchTerm || ''}
+            statusFilter={statusFilter || 'All'}
           />
         </div>
       </div>

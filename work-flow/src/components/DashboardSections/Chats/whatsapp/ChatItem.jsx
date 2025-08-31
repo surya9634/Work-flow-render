@@ -27,7 +27,7 @@ const ChatItem = ({ chat, isActive, onClick }) => {
     >
       <div className="flex items-start space-x-3">
         <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-green-500 flex items-center justify-center text-white font-semibold">
-          {chat.name.charAt(0)}
+          {(chat?.name || '?').toString().charAt(0)}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between">

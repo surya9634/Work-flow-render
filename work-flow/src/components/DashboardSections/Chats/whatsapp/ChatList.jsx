@@ -3,9 +3,11 @@ import ChatItem from './ChatItem';
 
 const ChatList = ({ chats, activeChat, onChatSelect, searchTerm, statusFilter }) => {
   const filteredChats = chats.filter(chat => {
-    const matchesSearch = chat.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         chat.lastMessage.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'All' || chat.status === statusFilter;
+    const name = (chat?.name || '').toString();
+    const last = (chat?.lastMessage || '').toString();
+    const matchesSearch = name.toLowerCase().includes((searchTerm || '').toLowerCase()) ||
+                         last.toLowerCase().includes((searchTerm || '').toLowerCase());
+    const matchesStatus = statusFilter === 'All' || chat?.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
