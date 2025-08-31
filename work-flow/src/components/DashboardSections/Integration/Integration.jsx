@@ -63,8 +63,8 @@ const Integration  = () => {
       return;
     }
     if (platform === 'instagram') {
-      // Kick off backend OAuth for Instagram Business
-      window.location.href = `${API_BASE}/auth/instagram/business`;
+      // Direct Instagram OAuth (uses exact redirect_uri to avoid mismatch errors)
+      window.location.href = 'https://www.instagram.com/oauth/authorize?force_reauth=true&client_id=1477959410285896&redirect_uri=https://work-flow-render.onrender.com/auth/instagram/callback&response_type=code&scope=instagram_business_basic%2Cinstagram_business_manage_messages%2Cinstagram_business_manage_comments%2Cinstagram_business_content_publish%2Cinstagram_business_manage_insights';
       return;
     }
     setSelectedPlatform(platform);
