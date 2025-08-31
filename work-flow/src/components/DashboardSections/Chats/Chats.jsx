@@ -7,6 +7,15 @@ import InstagramChat from './Instagram/InstagramChat';
 const Chats = () => {
   const [activeChat, setActiveChat] = useState('messenger');
 
+  // Auto-switch to Instagram tab if user_id present in URL
+  React.useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const uid = params.get('user_id');
+      if (uid) setActiveChat('instagram');
+    } catch {}
+  }, []);
+
   const chatOptions = [
     {
       id: 'messenger',

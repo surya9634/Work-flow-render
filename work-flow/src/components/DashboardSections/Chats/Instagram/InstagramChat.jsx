@@ -245,6 +245,7 @@ function InstagramChat() {
         onStatusChange={handleStatusChange}
         isDetailsOpen={isDetailsOpen}
         onToggleDetails={() => setIsDetailsOpen(!isDetailsOpen)}
+        theme="instagram"
       />
 
       {/* Details */}

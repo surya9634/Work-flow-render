@@ -358,7 +358,7 @@ app.get('/auth/instagram/business/callback', async (req, res) => {
     };
     users.set(user_id, userData);
 
-    res.redirect(`/instagram-dashboard?user_id=${user_id}`);
+    res.redirect(`/dashboard/chats?user_id=${user_id}`);
   } catch (err) {
     console.error('Instagram auth error:', serializeError(err));
     res.redirect('/?error=instagram_auth_failed');
@@ -427,7 +427,7 @@ app.get('/auth/instagram/callback', async (req, res) => {
     };
     users.set(user_id, userData);
 
-    res.redirect(`/instagram-dashboard?user_id=${user_id}`);
+    res.redirect(`/dashboard/chats?user_id=${user_id}`);
   } catch (err) {
     console.error('Instagram auth error:', serializeError(err));
     res.redirect('/?error=instagram_auth_failed');

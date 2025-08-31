@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Bot, ChevronDown, ChevronRight } from 'lucide-react';
 import Message from './Message';
 
-const ChatWindow = ({ activeChat, messages, onSendMessage, aiMode, onToggleAI, onStatusChange, isDetailsOpen, onToggleDetails }) => {
+const ChatWindow = ({ activeChat, messages, onSendMessage, aiMode, onToggleAI, onStatusChange, isDetailsOpen, onToggleDetails, theme = 'whatsapp' }) => {
   const [inputMessage, setInputMessage] = useState('');
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const messagesEndRef = useRef(null);
@@ -78,14 +78,14 @@ const ChatWindow = ({ activeChat, messages, onSendMessage, aiMode, onToggleAI, o
   return (
     <div className="flex-1 flex flex-col bg-white h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-green-50 to-green-50 flex-shrink-0">
+      <div className={`px-6 py-4 border-b border-gray-200 bg-gradient-to-r ${theme === 'instagram' ? 'from-pink-50 via-purple-50 to-indigo-50' : 'from-green-50 to-green-50'} flex-shrink-0`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-r from-green-500 to-green-500 flex items-center justify-center text-white font-semibold">
-              {activeChat.name.charAt(0)}
+            <div className={`w-10 h-10 rounded-full bg-gradient-to-r ${theme === 'instagram' ? 'from-pink-500 via-purple-500 to-indigo-500' : 'from-green-500 to-green-500'} flex items-center justify-center text-white font-semibold`}>
+              {(activeChat?.name || '?').toString().charAt(0)}
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-gray-800">{activeChat.name}</h2>
+              <h2 className="text-lg font-semibold text-gray-800">{activeChat?.name || 'Unknown'}</h2>
               
               {/* Status Dropdown */}
               <div className="relative" ref={dropdownRef}>
