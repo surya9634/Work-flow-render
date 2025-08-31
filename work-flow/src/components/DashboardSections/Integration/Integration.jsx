@@ -37,8 +37,13 @@ const Integration  = () => {
 
   const handleAddConnection = (platform) => {
     if (platform === 'facebook') {
-      // Kick off backend OAuth
+      // Kick off backend OAuth for Facebook
       window.location.href = `${API_BASE}/auth/facebook`;
+      return;
+    }
+    if (platform === 'instagram') {
+      // Kick off backend OAuth for Instagram Business
+      window.location.href = `${API_BASE}/auth/instagram/business`;
       return;
     }
     setSelectedPlatform(platform);

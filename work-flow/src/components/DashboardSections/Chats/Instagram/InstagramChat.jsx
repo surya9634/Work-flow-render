@@ -36,6 +36,8 @@ function InstagramChat() {
   const [userId, setUserId] = useState(''); // supply ig user id from auth redirect or input
   const [posts, setPosts] = useState([]);
   const [selectedPostId, setSelectedPostId] = useState('');
+  const [postComments, setPostComments] = useState([]);
+  const [loadingComments, setLoadingComments] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [autoMessage, setAutoMessage] = useState('Hi! How are you doing?');
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -58,10 +60,20 @@ function InstagramChat() {
     setChats(updated);
   };
 
-  const handleSendMessage = (text) => {
+  const handleSendMessage = async (text) => {
     const newMsg = { id: messages.length + 1, sender: 'me', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
     setMessages(prev => [...prev, newMsg]);
     if (activeChat) updateChatLastMessage(activeChat.id, text, newMsg.time);
+    // Send to backend if username present and userId set
+    try {
+      if (userId && activeChat?.name) {
+        await apiFetch('/api/instagram/send-dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId, username: activeChat.name, message: text })
+        });
+      }
+    } catch (_) {}
   };
 
   const handleStatusChange = (chatId, newStatus) => {
@@ -88,6 +100,20 @@ function InstagramChat() {
       setPosts([]);
     } finally {
       setLoadingPosts(false);
+    }
+  };
+
+  const fetchComments = async (pid) => {
+    if (!userId || !pid) return;
+    try {
+      setLoadingComments(true);
+      const resp = await apiFetch(`/api/instagram/comments?userId=${encodeURIComponent(userId)}&postId=${encodeURIComponent(pid)}`);
+      const data = await resp.json();
+      setPostComments(Array.isArray(data) ? data : []);
+    } catch {
+      setPostComments([]);
+    } finally {
+      setLoadingComments(false);
     }
   };
 
@@ -134,13 +160,37 @@ function InstagramChat() {
               <button onClick={fetchPosts} className="px-2 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50" disabled={!userId || loadingPosts}>
                 {loadingPosts ? 'Fetching…' : 'Fetch Posts'}
               </button>
-              <select className="flex-1 border rounded px-2 py-1 text-sm" value={selectedPostId} onChange={e => setSelectedPostId(e.target.value)}>
-                <option value="">Select a post</option>
-                {posts.map(p => (
-                  <option key={p.id} value={p.id}>{p.caption?.slice(0,40) || p.id}</option>
-                ))}
-              </select>
             </div>
+            {/* Posts grid */}
+            <div className="grid grid-cols-3 gap-2 mt-2 max-h-48 overflow-auto">
+              {posts.map(p => (
+                <button key={p.id} onClick={() => { setSelectedPostId(p.id); fetchComments(p.id); }} className={`border rounded overflow-hidden text-left ${selectedPostId===p.id ? 'ring-2 ring-indigo-500' : ''}`}>
+                  <img src={p.media_url} alt={p.caption?.slice(0,40) || 'post'} className="w-full h-20 object-cover" />
+                  <div className="p-1 text-[10px] text-gray-700 truncate">{p.caption || p.id}</div>
+                </button>
+              ))}
+            </div>
+            {/* Comments list for selected post */}
+            {selectedPostId && (
+              <div className="mt-2 border rounded p-2 bg-white">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-medium text-gray-700">Comments</div>
+                  <button onClick={() => fetchComments(selectedPostId)} className="text-xs text-indigo-600">{loadingComments ? '…' : 'Refresh'}</button>
+                </div>
+                <div className="max-h-36 overflow-auto mt-1 space-y-1">
+                  {postComments.length === 0 && (
+                    <div className="text-xs text-gray-500">No comments.</div>
+                  )}
+                  {postComments.map(c => (
+                    <div key={c.id} className="text-xs text-gray-800 flex items-start gap-2">
+                      <div className="font-medium">@{c.username}</div>
+                      <div className="flex-1">{c.text}</div>
+                      <button onClick={() => setActiveChat({ id: c.username, name: c.username, lastMessage: '', time: '' })} className="text-[10px] px-2 py-0.5 border rounded">DM</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <input
               className="w-full border rounded px-2 py-1 text-sm"
               placeholder="Keyword (optional)"
