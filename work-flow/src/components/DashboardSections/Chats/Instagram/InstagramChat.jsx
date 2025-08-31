@@ -218,6 +218,8 @@ function InstagramChat() {
             setSearchTerm={setSearchTerm}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
+            title="Instagram Chats"
+            theme="instagram"
           />
         </div>
         {/* Chat List */}
@@ -228,6 +230,7 @@ function InstagramChat() {
             onChatSelect={setActiveChat}
             searchTerm={searchTerm || ''}
             statusFilter={statusFilter || 'All'}
+            theme="instagram"
           />
         </div>
       </div>

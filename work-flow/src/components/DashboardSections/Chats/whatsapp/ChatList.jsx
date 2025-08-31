@@ -1,7 +1,7 @@
 import React from 'react';
 import ChatItem from './ChatItem';
 
-const ChatList = ({ chats, activeChat, onChatSelect, searchTerm, statusFilter }) => {
+const ChatList = ({ chats, activeChat, onChatSelect, searchTerm, statusFilter, theme = 'whatsapp' }) => {
   const filteredChats = chats.filter(chat => {
     const name = (chat?.name || '').toString();
     const last = (chat?.lastMessage || '').toString();
@@ -25,6 +25,7 @@ const ChatList = ({ chats, activeChat, onChatSelect, searchTerm, statusFilter })
             chat={chat}
             isActive={activeChat?.id === chat.id}
             onClick={() => onChatSelect(chat)}
+            theme={theme}
           />
         ))
       )}
