@@ -7,6 +7,27 @@ import AutomationModal from './AutomationModal';
 import { platforms } from '../../data/platformData';
 import WhatsAppIntegrationPanel from './WhatsAppIntegrationPanel';
 
+const FacebookAppBanner = () => {
+  const [info, setInfo] = React.useState({ appId: null, appName: null, callback: null });
+  React.useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`${window.location.origin}/api/facebook/app`);
+        const data = await res.json();
+        if (!ignore) setInfo(data || {});
+      } catch (_) {}
+    })();
+    return () => { ignore = true; };
+  }, []);
+  if (!info?.appId) return null;
+  return (
+    <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+      Using Facebook App: <span className="font-medium">{info.appName || 'Unknown'}</span> (ID: {info.appId}) · Callback: <code className="bg-white px-1 py-0.5 rounded border">{info.callback}</code>
+    </div>
+  );
+};
+
 const Integration  = () => {
   const [connectedAccounts, setConnectedAccounts] = useState([]);
   const [automations, setAutomations] = useState([]);
@@ -126,9 +147,11 @@ const Integration  = () => {
 
         {/* Connected Accounts Section */}
         <div className="mb-12">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center justify-between mb-2">
             <h2 className="text-xl font-semibold text-gray-900">Connected Accounts</h2>
           </div>
+          {/* FB App banner */}
+          <FacebookAppBanner />
 
           {/* Platform Connection Buttons */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

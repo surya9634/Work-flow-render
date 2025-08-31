@@ -2189,6 +2189,30 @@ app.post('/api/ai/test', async (req, res) => {
   }
 });
 
+// Facebook App info endpoint (for UI banner)
+app.get('/api/facebook/app', async (_req, res) => {
+  try {
+    const appId = config.facebook.appId || null;
+    const appSecret = config.facebook.appSecret || null;
+    const callback = config.facebook.callbackUrl || null;
+    let appName = null;
+    if (appId && appSecret) {
+      const appToken = `${appId}|${appSecret}`;
+      try {
+        const resp = await axios.get(`https://graph.facebook.com/v21.0/${encodeURIComponent(appId)}`, {
+          params: { access_token: appToken, fields: 'name' },
+          timeout: 8000
+        });
+        appName = resp?.data?.name || null;
+      } catch (_) { /* ignore */ }
+    }
+    return res.json({ appId, appName, callback });
+  } catch (err) {
+    console.error('App info error:', serializeError(err));
+    return res.status(500).json({ error: 'app_info_failed' });
+  }
+});
+
 // SPA fallback: send index.html for non-API routes
 app.get(/^(?!\/api\/).*/, (_req, res) => {
   res.sendFile(path.join(clientDir, 'index.html'));
