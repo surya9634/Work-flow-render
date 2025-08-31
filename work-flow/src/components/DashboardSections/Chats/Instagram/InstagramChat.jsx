@@ -4,6 +4,7 @@ import ChatWindow from '../whatsapp/ChatWindow';
 import ChatFilter from '../whatsapp/ChatFilter';
 import CustomerDetails from '../whatsapp/CustomerDetails';
 import { apiFetch } from '../../../../lib/api';
+import toast from 'react-hot-toast';
 
 // NOTE: This mirrors WhatsApp UI to keep consistent UX. Replace mock data with real IG DM data later.
 function InstagramChat() {
@@ -67,13 +68,22 @@ function InstagramChat() {
     // Send to backend if username present and userId set
     try {
       if (userId && activeChat?.name) {
-        await apiFetch('/api/instagram/send-dm', {
+        const resp = await apiFetch('/api/instagram/send-dm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId, username: activeChat.name, message: text })
         });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data?.error) {
+          throw new Error(data?.error || 'Send failed');
+        }
+        toast.success('Sent via Instagram');
+      } else {
+        toast('Connect IG and select a username from comments to DM', { icon: 'ℹ️' });
       }
-    } catch (_) {}
+    } catch (e) {
+      toast.error(e.message || 'Failed to send');
+    }
   };
 
   const handleStatusChange = (chatId, newStatus) => {
