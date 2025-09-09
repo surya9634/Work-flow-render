@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { 
   Settings, 
-  FileText, 
+  FileText,
+  Contact2,
   Share2,
   X,
   MessagesSquare,
@@ -39,7 +40,7 @@ const WorkFlowDashboard = () => {
     { icon: Share2, label: 'Integration', path: 'integration' },
     { icon: MessagesSquare, label: 'Chats', path: 'chats' },
     { icon: FileText, label: 'AI Counsellor', path: 'ai-counsellor' },
-    { icon: FileText, label: 'Contacts', path: 'contacts' },
+    { icon: Contact2, label: 'Contacts', path: 'contacts' },
   ];
 
   // Get active section from current path

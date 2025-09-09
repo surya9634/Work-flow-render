@@ -115,27 +115,27 @@ const ContactUploadPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-black py-8 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
-            <Users className="h-8 w-8 text-[#1F7D53] mr-3" />
-            <h1 className="text-3xl font-bold text-white">Contact Management</h1>
+            <Users className="h-8 w-8 text-blue-600 mr-3" />
+            <h1 className="text-3xl font-bold text-gray-900">Contact Management</h1>
           </div>
-          <p className="text-gray-300 max-w-2xl mx-auto">
+          <p className="text-gray-600 max-w-2xl mx-auto">
             Upload your contact lists to start automation campaigns. Support CSV format
             with name, email, and phone columns.
           </p>
         </div>
 
         {/* Upload Section */}
-        <div className="bg-gray-900 rounded-lg shadow-lg p-6 mb-8 border border-gray-800">
+        <div className="bg-white rounded-lg shadow p-6 mb-8 border border-gray-200">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-white">Upload Contacts</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Upload Contacts</h2>
             <button
               onClick={downloadTemplate}
-              className="flex items-center px-4 py-2 text-sm font-medium text-[#1F7D53] bg-[#255F38] rounded-lg hover:bg-[#1F7D53] hover:text-white transition-colors"
+              className="flex items-center px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-600 hover:text-white transition-colors"
             >
               <Download className="h-4 w-4 mr-2" />
               Download Template
@@ -145,7 +145,7 @@ const ContactUploadPage = () => {
           {/* File Upload Area */}
           <div
             className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              dragActive ? 'border-[#1F7D53] bg-[#255F38]' : 'border-gray-700 hover:border-gray-600'
+              dragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
             }`}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
@@ -153,35 +153,35 @@ const ContactUploadPage = () => {
             onDrop={handleDrop}
           >
             <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-lg font-medium text-gray-300 mb-2">
+            <p className="text-lg font-medium text-gray-700 mb-2">
               Drop your CSV file here, or
-              <label className="text-[#1F7D53] hover:text-white cursor-pointer ml-1">
+              <label className="text-blue-600 hover:text-blue-700 cursor-pointer ml-1">
                 browse
                 <input type="file" accept=".csv" onChange={handleFileChange} className="hidden" />
               </label>
             </p>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-gray-500">
               Supports CSV files with name, email, and phone columns
             </p>
           </div>
 
           {selectedFile && (
-            <div className="mt-4 p-4 bg-[#255F38] rounded-lg border border-[#1F7D53]">
-              <p className="text-white font-medium">✓ File uploaded: {selectedFile.name}</p>
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-gray-900 font-medium">✓ File uploaded: {selectedFile.name}</p>
               {isProcessing && (
-                <p className="text-gray-300 text-sm mt-1">Processing contacts...</p>
+                <p className="text-gray-600 text-sm mt-1">Processing contacts...</p>
               )}
             </div>
           )}
         </div>
 
         {/* Manual Contact Addition */}
-        <div className="bg-gray-900 rounded-lg shadow-lg p-6 mb-8 border border-gray-800">
+        <div className="bg-white rounded-lg shadow p-6 mb-8 border border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold text-white">Add Contact Manually</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Add Contact Manually</h2>
             <button
               onClick={() => setShowManualForm(!showManualForm)}
-              className="flex items-center px-4 py-2 text-sm font-medium text-white bg-[#1F7D53] rounded-lg hover:bg-[#255F38] transition-colors"
+              className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
             >
               {showManualForm ? <X className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
               {showManualForm ? 'Cancel' : 'Add Contact'}
@@ -189,20 +189,20 @@ const ContactUploadPage = () => {
           </div>
 
           {showManualForm && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-[#255F38] rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
               <input
                 type="text"
                 placeholder="Name"
                 value={manualContact.name}
                 onChange={(e) => setManualContact({ ...manualContact, name: e.target.value })}
-                className="px-3 py-2 border border-gray-700 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1F7D53] placeholder-gray-400"
+                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
               />
               <input
                 type="email"
                 placeholder="Email"
                 value={manualContact.email}
                 onChange={(e) => setManualContact({ ...manualContact, email: e.target.value })}
-                className="px-3 py-2 border border-gray-700 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1F7D53] placeholder-gray-400"
+                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
               />
               <div className="flex gap-2">
                 <input
@@ -210,11 +210,11 @@ const ContactUploadPage = () => {
                   placeholder="Phone"
                   value={manualContact.phone}
                   onChange={(e) => setManualContact({ ...manualContact, phone: e.target.value })}
-                  className="flex-1 px-3 py-2 border border-gray-700 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1F7D53] placeholder-gray-400"
+                  className="flex-1 px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
                 />
                 <button
                   onClick={addManualContact}
-                  className="px-4 py-2 bg-[#1F7D53] text-white rounded-lg hover:bg-black transition-colors"
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                 >
                   Add
                 </button>
@@ -225,14 +225,14 @@ const ContactUploadPage = () => {
 
         {/* Contacts List */}
         {uploadedContacts.length > 0 && (
-          <div className="bg-gray-900 rounded-lg shadow-lg p-6 mb-8 border border-gray-800">
+          <div className="bg-white rounded-lg shadow p-6 mb-8 border border-gray-200">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-white">
+              <h2 className="text-xl font-semibold text-gray-900">
                 Uploaded Contacts ({uploadedContacts.length})
               </h2>
               <button
                 onClick={startAutomation}
-                className="flex items-center px-6 py-3 bg-[#1F7D53] text-white rounded-lg hover:bg-[#255F38] transition-colors font-medium"
+                className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
               >
                 <Mail className="h-5 w-5 mr-2" />
                 Start Automation
@@ -240,45 +240,45 @@ const ContactUploadPage = () => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-800">
-                <thead className="bg-[#255F38]">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Name
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Email
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Phone
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-gray-800 divide-y divide-gray-700">
+                <tbody className="bg-white divide-y divide-gray-200">
                   {uploadedContacts.map((contact) => (
-                    <tr key={contact.id} className="hover:bg-gray-700">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-white">
+                    <tr key={contact.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {contact.name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                         <div className="flex items-center">
                           <Mail className="h-4 w-4 mr-2 text-gray-400" />
                           {contact.email || 'N/A'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                         <div className="flex items-center">
                           <Phone className="h-4 w-4 mr-2 text-gray-400" />
                           {contact.phone || 'N/A'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                         <button
                           onClick={() => removeContact(contact.id)}
-                          className="text-red-500 hover:text-red-400 transition-colors"
+                          className="text-red-600 hover:text-red-700 transition-colors"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -294,9 +294,9 @@ const ContactUploadPage = () => {
         {/* Empty State */}
         {uploadedContacts.length === 0 && !isProcessing && (
           <div className="text-center py-12">
-            <Users className="h-16 w-16 text-gray-600 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-300 mb-2">No contacts uploaded yet</h3>
-            <p className="text-gray-400">Upload a CSV file or add contacts manually to get started</p>
+            <Users className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No contacts uploaded yet</h3>
+            <p className="text-gray-600">Upload a CSV file or add contacts manually to get started</p>
           </div>
         )}
       </div>
