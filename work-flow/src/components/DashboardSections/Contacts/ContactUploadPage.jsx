@@ -1,14 +1,33 @@
 import React, { useState } from 'react';
-import { Upload, Users, Mail, Phone, Trash2, Download, Plus, X } from 'lucide-react';
+import {
+  Upload,
+  Users,
+  Mail,
+  Phone,
+  Trash2,
+  Download,
+  Plus,
+  X,
+  MessageCircle,
+  Instagram,
+  Link2,
+} from 'lucide-react';
 
-// Contact upload/management page
-// Ported from call-automation.txt and placed under DashboardSections to appear as a tab in the dashboard
+// Contact upload/management page (light theme)
+// Extended to include Messenger username, Instagram username, and an optional connected user ID
 const ContactUploadPage = () => {
   const [uploadedContacts, setUploadedContacts] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [manualContact, setManualContact] = useState({ name: '', email: '', phone: '' });
+  const [manualContact, setManualContact] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    messenger: '',
+    instagram: '',
+    connectedUserId: '', // e.g., Messenger PSID or IG user id if already connected
+  });
   const [showManualForm, setShowManualForm] = useState(false);
 
   const handleDrag = (e) => {
@@ -52,19 +71,37 @@ const ContactUploadPage = () => {
 
     reader.onload = (e) => {
       const text = e.target.result;
-      const lines = text.split('\n');
+      const lines = text.split('\n').filter((l) => l.trim().length > 0);
+      if (lines.length === 0) {
+        setUploadedContacts([]);
+        setIsProcessing(false);
+        return;
+      }
       const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+
+      const idx = {
+        name: headers.indexOf('name'),
+        email: headers.indexOf('email'),
+        phone: headers.indexOf('phone'),
+        messenger: headers.indexOf('messenger'),
+        instagram: headers.indexOf('instagram'),
+        connectedUserId: headers.indexOf('connecteduserid'),
+      };
 
       const contacts = lines
         .slice(1)
         .filter((line) => line.trim())
         .map((line, index) => {
           const values = line.split(',').map((v) => v.trim());
+          const get = (i, fallback = '') => (i >= 0 && i < values.length ? values[i] : fallback);
           return {
             id: Date.now() + index,
-            name: values[headers.indexOf('name')] || values[0] || 'Unknown',
-            email: values[headers.indexOf('email')] || values[1] || '',
-            phone: values[headers.indexOf('phone')] || values[2] || '',
+            name: get(idx.name) || values[0] || 'Unknown',
+            email: get(idx.email),
+            phone: get(idx.phone),
+            messenger: get(idx.messenger),
+            instagram: get(idx.instagram),
+            connectedUserId: get(idx.connectedUserId),
           };
         });
 
@@ -76,7 +113,14 @@ const ContactUploadPage = () => {
   };
 
   const addManualContact = () => {
-    if (manualContact.name && (manualContact.email || manualContact.phone)) {
+    const hasAnyContactMethod =
+      manualContact.email ||
+      manualContact.phone ||
+      manualContact.messenger ||
+      manualContact.instagram ||
+      manualContact.connectedUserId;
+
+    if (manualContact.name && hasAnyContactMethod) {
       setUploadedContacts((prev) => [
         ...prev,
         {
@@ -84,8 +128,10 @@ const ContactUploadPage = () => {
           ...manualContact,
         },
       ]);
-      setManualContact({ name: '', email: '', phone: '' });
+      setManualContact({ name: '', email: '', phone: '', messenger: '', instagram: '', connectedUserId: '' });
       setShowManualForm(false);
+    } else {
+      alert('Please provide a name and at least one contact method (email, phone, messenger, instagram, or connected user id).');
     }
   };
 
@@ -95,7 +141,9 @@ const ContactUploadPage = () => {
 
   const downloadTemplate = () => {
     const csvContent =
-      'name,email,phone\nJohn Doe,john@example.com,+1234567890\nJane Smith,jane@example.com,+0987654321';
+      'name,email,phone,messenger,instagram,connectedUserId\n' +
+      'John Doe,john@example.com,+1234567890,john.doe.fb,johndoe,psid_or_igid\n' +
+      'Jane Smith,jane@example.com,+0987654321,,janes_ig,';
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -110,13 +158,13 @@ const ContactUploadPage = () => {
       alert('Please upload contacts first');
       return;
     }
+    // Here you could POST to your backend to create a campaign or queue messages.
     alert(`Starting automation for ${uploadedContacts.length} contacts!`);
-    // Integrate with automation system here
   };
 
   return (
     <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center mb-4">
@@ -124,8 +172,7 @@ const ContactUploadPage = () => {
             <h1 className="text-3xl font-bold text-gray-900">Contact Management</h1>
           </div>
           <p className="text-gray-600 max-w-2xl mx-auto">
-            Upload your contact lists to start automation campaigns. Support CSV format
-            with name, email, and phone columns.
+            Upload your contact lists to start automation campaigns. Supported columns: name, email, phone, messenger, instagram, connectedUserId.
           </p>
         </div>
 
@@ -161,7 +208,7 @@ const ContactUploadPage = () => {
               </label>
             </p>
             <p className="text-sm text-gray-500">
-              Supports CSV files with name, email, and phone columns
+              Supports CSV files with columns: name, email, phone, messenger, instagram, connectedUserId
             </p>
           </div>
 
@@ -204,14 +251,50 @@ const ContactUploadPage = () => {
                 onChange={(e) => setManualContact({ ...manualContact, email: e.target.value })}
                 className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
               />
-              <div className="flex gap-2">
+              <input
+                type="tel"
+                placeholder="Phone"
+                value={manualContact.phone}
+                onChange={(e) => setManualContact({ ...manualContact, phone: e.target.value })}
+                className="px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+              />
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 pl-3 flex items-center">
+                  <MessageCircle className="h-4 w-4 text-gray-400" />
+                </div>
                 <input
-                  type="tel"
-                  placeholder="Phone"
-                  value={manualContact.phone}
-                  onChange={(e) => setManualContact({ ...manualContact, phone: e.target.value })}
-                  className="flex-1 px-3 py-2 border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+                  type="text"
+                  placeholder="Messenger username (optional)"
+                  value={manualContact.messenger}
+                  onChange={(e) => setManualContact({ ...manualContact, messenger: e.target.value })}
+                  className="pl-9 px-3 py-2 w-full border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
                 />
+              </div>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 pl-3 flex items-center">
+                  <Instagram className="h-4 w-4 text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Instagram username (optional)"
+                  value={manualContact.instagram}
+                  onChange={(e) => setManualContact({ ...manualContact, instagram: e.target.value })}
+                  className="pl-9 px-3 py-2 w-full border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+                />
+              </div>
+              <div className="relative md:col-span-1">
+                <div className="pointer-events-none absolute inset-y-0 left-0 pl-3 flex items-center">
+                  <Link2 className="h-4 w-4 text-gray-400" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Connected user ID (PSID/IG ID)"
+                  value={manualContact.connectedUserId}
+                  onChange={(e) => setManualContact({ ...manualContact, connectedUserId: e.target.value })}
+                  className="pl-9 px-3 py-2 w-full border border-gray-300 bg-white text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400"
+                />
+              </div>
+              <div className="md:col-span-3 flex justify-end">
                 <button
                   onClick={addManualContact}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -243,26 +326,19 @@ const ContactUploadPage = () => {
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Name
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Phone
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Name</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Email</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Phone</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Messenger</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Instagram</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Linked</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                   {uploadedContacts.map((contact) => (
                     <tr key={contact.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {contact.name}
-                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{contact.name}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                         <div className="flex items-center">
                           <Mail className="h-4 w-4 mr-2 text-gray-400" />
@@ -274,6 +350,29 @@ const ContactUploadPage = () => {
                           <Phone className="h-4 w-4 mr-2 text-gray-400" />
                           {contact.phone || 'N/A'}
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                        <div className="flex items-center">
+                          <MessageCircle className="h-4 w-4 mr-2 text-gray-400" />
+                          {contact.messenger || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                        <div className="flex items-center">
+                          <Instagram className="h-4 w-4 mr-2 text-gray-400" />
+                          {contact.instagram || 'N/A'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm">
+                        {contact.connectedUserId ? (
+                          <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-green-50 text-green-700 border border-green-200">
+                            Linked
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                            Not linked
+                          </span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                         <button
