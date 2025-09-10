@@ -224,6 +224,70 @@ const ContactUploadPage = () => {
     alert(`Requested automation. Sent now: ${ok}, failed: ${fail}, pending until first message: ${pending}.`);
   };
 
+  // Start for a single contact (immediate if PSID; otherwise pending/match by username)
+  const startForUser = async (c) => {
+    const API = import.meta.env.VITE_API_BASE || '';
+    const name = c.name || '';
+    const messenger = (c.messenger || '').trim();
+    const psid = (c.connectedUserId || '').trim();
+    const initialMessage = (window.prompt('Initial message:', 'Hi! This is our assistant. How can we help you today?') || '').trim();
+
+    if (psid) {
+      try {
+        const r = await fetch(`${API}/api/automation/start-for-contact`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage })
+        });
+        const data = await r.json();
+        if (data?.success) {
+          alert('Sent now ✅');
+        } else if (data?.pending) {
+          alert('Pending until user sends first message ⏳');
+        } else {
+          alert('Failed to start ❌');
+        }
+      } catch {
+        alert('Failed to start ❌');
+      }
+      return;
+    }
+
+    if (messenger) {
+      try {
+        await fetch(`${API}/api/messenger/conversations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            username: messenger,
+            autoStartIfFirstMessage: true,
+            systemPrompt: '',
+            initialMessage
+          })
+        });
+      } catch {}
+      try {
+        const r = await fetch(`${API}/api/automation/start-for-contact`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage })
+        });
+        const data = await r.json();
+        if (data?.success) {
+          alert('Matched and sent now ✅');
+        } else {
+          alert('Pending until user sends first message ⏳');
+        }
+      } catch {
+        alert('Pending until user sends first message ⏳');
+      }
+      return;
+    }
+
+    alert('Provide Messenger username or connectedUserId (PSID) to start.');
+  };
+
   return (
     <div className="min-h-screen py-8 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto">
@@ -437,12 +501,21 @@ const ContactUploadPage = () => {
                         )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                        <button
-                          onClick={() => removeContact(contact.id)}
-                          className="text-red-600 hover:text-red-700 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => startForUser(contact)}
+                            className="text-blue-600 hover:text-blue-700 transition-colors"
+                            title="Start campaign for this user"
+                          >
+                            Start for this user
+                          </button>
+                          <button
+                            onClick={() => removeContact(contact.id)}
+                            className="text-red-600 hover:text-red-700 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
