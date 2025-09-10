@@ -153,13 +153,75 @@ const ContactUploadPage = () => {
     window.URL.revokeObjectURL(url);
   };
 
-  const startAutomation = () => {
+  const startAutomation = async () => {
     if (uploadedContacts.length === 0) {
       alert('Please upload contacts first');
       return;
     }
-    // Here you could POST to your backend to create a campaign or queue messages.
-    alert(`Starting automation for ${uploadedContacts.length} contacts!`);
+
+    const prompt = window.prompt('Custom initial message to send (used when possible):', 'Hi! This is our assistant. How can we help you today?');
+    const initialMessage = (prompt || '').trim();
+
+    let ok = 0, fail = 0, pending = 0;
+
+    for (const c of uploadedContacts) {
+      const name = c.name || '';
+      const messenger = (c.messenger || '').trim();
+      const psid = (c.connectedUserId || '').trim();
+
+      // If we have PSID, try to find the thread and turn AI on + send now
+      if (psid) {
+        try {
+          const r = await fetch('/api/automation/start-for-contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage })
+          });
+          const data = await r.json();
+          if (data && data.success) ok++; else fail++;
+        } catch {
+          fail++;
+        }
+        continue;
+      }
+
+      // If only username, we try to match to existing FB conversations by display name, else store for auto-start later
+      if (messenger) {
+        try {
+          // Create a memo entry so when this username messages first time, AI will auto-start
+          const payload = {
+            name,
+            username: messenger,
+            autoStartIfFirstMessage: true,
+            systemPrompt: '',
+            initialMessage
+          };
+          await fetch('/api/messenger/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          pending++;
+        } catch {
+          // ignore
+        }
+
+        // Best-effort: ask backend to try to start immediately by matching username to existing convs
+        try {
+          const r = await fetch('/api/automation/start-for-contact', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage })
+          });
+          const data = await r.json();
+          if (data && data.success) { ok++; } else { /* remains pending */ }
+        } catch {
+          // remains pending
+        }
+      }
+    }
+
+    alert(`Requested automation. Sent now: ${ok}, failed: ${fail}, pending until first message: ${pending}.`);
   };
 
   return (

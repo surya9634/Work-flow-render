@@ -629,17 +629,19 @@ const messengerStore = {
   messages: new Map(), // convId -> [ { id, sender, text, timestamp } ]
   systemPrompts: new Map(), // convId -> string
   responseTimes: new Map(), // convId -> number[] (ms)
+  pendingAutoStart: new Map(), // nameNormalized -> { systemPrompt?: string, createdAt: ISO }
 };
 
 // Track last customer message time per conversation for response time measurement (not persisted)
 const lastCustomerAtByConversation = new Map();
 
 function loadMessengerStore() {
-  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {} });
+  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {}, pendingAutoStart: {} });
   messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
   messengerStore.messages = new Map(Object.entries(json.messages));
   messengerStore.systemPrompts = new Map(Object.entries(json.systemPrompts || {}));
   messengerStore.responseTimes = new Map(Object.entries(json.responseTimes || {}));
+  messengerStore.pendingAutoStart = new Map(Object.entries(json.pendingAutoStart || {}));
 }
 
 function saveMessengerStore() {
@@ -647,7 +649,8 @@ function saveMessengerStore() {
   const messages = Object.fromEntries(Array.from(messengerStore.messages.entries()));
   const systemPrompts = Object.fromEntries(Array.from(messengerStore.systemPrompts.entries()));
   const responseTimes = Object.fromEntries(Array.from(messengerStore.responseTimes.entries()));
-  writeJsonSafe(messengerFile, { conversations, messages, systemPrompts, responseTimes });
+  const pendingAutoStart = Object.fromEntries(Array.from(messengerStore.pendingAutoStart.entries()));
+  writeJsonSafe(messengerFile, { conversations, messages, systemPrompts, responseTimes, pendingAutoStart });
 }
 
 function seedMessengerDataIfEmpty() {
@@ -991,6 +994,20 @@ async function fbGetProfilePic(psid) {
   }
 }
 
+// Find FB conversation thread by participant PSID
+async function findThreadIdByPsid(psid) {
+  try {
+    const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,participants.limit(10){id}', limit: 200 });
+    const conv = (data.data || []).find(c => {
+      const parts = (c.participants && c.participants.data) || [];
+      return parts.some(p => String(p.id) === String(psid));
+    });
+    return conv ? conv.id : null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function generateWithGemini(userText, systemPrompt) {
   if (!config.ai.geminiKey) throw new Error('gemini_key_missing');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
@@ -1157,7 +1174,7 @@ Return ONLY JSON.`;
 
 // Create conversation
 app.post('/api/messenger/conversations', (req, res) => {
-  const { name, username, profilePic } = req.body || {};
+  const { name, username, profilePic, autoStartIfFirstMessage, systemPrompt, initialMessage } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name required' });
   const id = 'conv_' + Date.now();
   const conv = {
@@ -1173,9 +1190,88 @@ app.post('/api/messenger/conversations', (req, res) => {
   messengerStore.messages.set(id, []);
   messengerStore.systemPrompts.set(id, '');
   aiModeByConversation.set(id, false); // default OFF until user enables
+  // If requested, remember by normalized name so that on first inbound message AI turns on and sends initialMessage
+  if (autoStartIfFirstMessage === true && (username || name)) {
+    const key = String(username || name).toLowerCase().replace(/\s+/g, '');
+    messengerStore.pendingAutoStart.set(key, { systemPrompt: String(systemPrompt || ''), initialMessage: String(initialMessage || '') , createdAt: new Date().toISOString() });
+  }
   saveMessengerStore();
   io.emit('messenger:conversation_created', conv);
   return res.json({ success: true, conversation: conv });
+});
+
+// Start automation for a specific contact (by PSID or by matching username to existing convs)
+app.post('/api/automation/start-for-contact', async (req, res) => {
+  try {
+    const { name, messenger, connectedUserId, initialMessage } = req.body || {};
+    if (config.facebook.provider !== 'facebook' || !config.facebook.pageId || !config.facebook.pageToken) {
+      return res.status(400).json({ success: false, message: 'facebook_not_configured' });
+    }
+
+    const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, '');
+    let psid = String(connectedUserId || '').trim();
+    let threadId = null;
+
+    if (psid) {
+      // We already have a PSID, find its thread
+      threadId = await findThreadIdByPsid(psid);
+    }
+
+    // If no thread by PSID, try to match messenger username to existing FB conversations by display name
+    if (!threadId && messenger) {
+      try {
+        const data = await fbApiGet(`${config.facebook.pageId}/conversations`, { fields: 'id,participants.limit(10){id,name}', limit: 200 });
+        const target = norm(messenger);
+        for (const c of (data.data || [])) {
+          const parts = (c.participants && c.participants.data) || [];
+          const other = parts.find(p => String(p.id) !== String(config.facebook.pageId)) || parts[0];
+          if (other && norm(other.name) === target) {
+            threadId = c.id;
+            psid = other.id;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // If still no threadId, store a pending auto-start entry so when they message first time, AI turns on and sends initialMessage
+    if (!threadId) {
+      if (messenger) {
+        const key = norm(messenger || name);
+        messengerStore.pendingAutoStart.set(key, { systemPrompt: '', initialMessage: String(initialMessage || '') , createdAt: new Date().toISOString() });
+        saveMessengerStore();
+        return res.json({ success: false, pending: true, message: 'pending_until_first_message' });
+      }
+      return res.status(400).json({ success: false, message: 'no_thread_found' });
+    }
+
+    // Enable AI mode for this thread and send initial message
+    fbConvParticipants.set(threadId, psid);
+    aiModeByConversation.set(threadId, true);
+    const text = String(initialMessage || `Hi ${name || ''}! How can we help you today?`).trim().slice(0, 900);
+    await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+      recipient: { id: psid },
+      message: { text },
+      messaging_type: 'RESPONSE'
+    }, { params: { access_token: config.facebook.pageToken } });
+
+    // Persist message in local store for UI
+    const now = new Date().toISOString();
+    const arr = messengerStore.messages.get(threadId) || [];
+    const msg = { id: 'agent_' + Date.now(), sender: 'agent', text, timestamp: now, isRead: true };
+    arr.push(msg);
+    messengerStore.messages.set(threadId, arr);
+    const conv = messengerStore.conversations.get(threadId) || { id: threadId, name: name || `FB:${psid}`, profilePic: '', lastMessage: '', timestamp: now, unreadCount: 0 };
+    conv.lastMessage = text; conv.timestamp = now;
+    messengerStore.conversations.set(threadId, conv);
+    saveMessengerStore();
+    io.emit('messenger:message_created', { conversationId: threadId, message: msg });
+
+    return res.json({ success: true, conversationId: threadId, psid });
+  } catch (e) {
+    console.error('start-for-contact error:', serializeError(e));
+    return res.status(500).json({ success: false, message: 'start_failed' });
+  }
 });
 
 app.post('/api/messenger/ai-reply', async (req, res) => {
@@ -1889,6 +1985,49 @@ app.post('/webhook', async (req, res) => {
         const senderId = event.sender && event.sender.id;
         const message = event.message;
         if (senderId && message && (message.text || message.attachments)) {
+          // If this sender matches a pending auto-start by normalized name, enable AI and send initial message
+          try {
+            if (messengerStore.pendingAutoStart && messengerStore.pendingAutoStart.size > 0) {
+              // Resolve thread id for this PSID to read participant name
+              const threadIdForCheck = await findThreadIdByPsid(senderId);
+              if (threadIdForCheck) {
+                const conv = await fbApiGet(`${threadIdForCheck}`, { fields: 'participants.limit(10){id,name}' });
+                const parts = (conv.participants && conv.participants.data) || [];
+                const other = parts.find(p => String(p.id) !== String(config.facebook.pageId)) || parts[0];
+                const otherName = (other && other.name) ? other.name.toLowerCase().replace(/\s+/g, '') : '';
+                if (otherName && messengerStore.pendingAutoStart.has(otherName)) {
+                  const plan = messengerStore.pendingAutoStart.get(otherName) || {};
+                  messengerStore.pendingAutoStart.delete(otherName);
+                  // Ensure mappings and AI mode ON
+                  fbConvParticipants.set(threadIdForCheck, senderId);
+                  const sp = String(plan.systemPrompt || '').trim();
+                  if (sp) messengerStore.systemPrompts.set(threadIdForCheck, sp);
+                  aiModeByConversation.set(threadIdForCheck, true);
+                  saveMessengerStore();
+                  // Send initial message now
+                  const init = String(plan.initialMessage || `Hi! How can we help you today?`).slice(0, 900);
+                  await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+                    recipient: { id: senderId },
+                    message: { text: init },
+                    messaging_type: 'RESPONSE'
+                  }, { params: { access_token: config.facebook.pageToken } });
+                  // Persist and emit
+                  const aiNow = new Date().toISOString();
+                  const arrInit = messengerStore.messages.get(threadIdForCheck) || [];
+                  const initMsg = { id: 'agent_' + Date.now(), sender: 'agent', text: init, timestamp: aiNow, isRead: true };
+                  arrInit.push(initMsg);
+                  messengerStore.messages.set(threadIdForCheck, arrInit);
+                  const conv0 = messengerStore.conversations.get(threadIdForCheck) || { id: threadIdForCheck, name: `FB:${senderId}`, profilePic: '', lastMessage: '', timestamp: aiNow, unreadCount: 0 };
+                  conv0.lastMessage = init; conv0.timestamp = aiNow;
+                  messengerStore.conversations.set(threadIdForCheck, conv0);
+                  saveMessengerStore();
+                  io.emit('messenger:message_created', { conversationId: threadIdForCheck, message: initMsg });
+                }
+              }
+            }
+          } catch (autoErr) {
+            console.warn('Auto-start on first message failed:', serializeError(autoErr));
+          }
           // Resolve thread id for this PSID
           const threadId = await findThreadIdByPsid(senderId);
           if (threadId) {
