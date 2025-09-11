@@ -159,6 +159,7 @@ const ContactUploadPage = () => {
       return;
     }
 
+    const API = import.meta.env.VITE_API_BASE || '';
     const prompt = window.prompt('Custom initial message to send (used when possible):', 'Hi! This is our assistant. How can we help you today?');
     const initialMessage = (prompt || '').trim();
 
@@ -172,7 +173,7 @@ const ContactUploadPage = () => {
       // If we have PSID, try to find the thread and turn AI on + send now
       if (psid) {
         try {
-          const r = await fetch('/api/automation/start-for-contact', {
+          const r = await fetch(`${API}/api/automation/start-for-contact`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage })
@@ -196,7 +197,7 @@ const ContactUploadPage = () => {
             systemPrompt: '',
             initialMessage
           };
-          await fetch('/api/messenger/conversations', {
+          await fetch(`${API}/api/messenger/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -208,7 +209,7 @@ const ContactUploadPage = () => {
 
         // Best-effort: ask backend to try to start immediately by matching username to existing convs
         try {
-          const r = await fetch('/api/automation/start-for-contact', {
+          const r = await fetch(`${API}/api/automation/start-for-contact`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage })
