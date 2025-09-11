@@ -4,48 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      type: 'success',
-      title: 'AI Training Complete',
-      message: 'Your AI model has been successfully trained with 150 Q&A pairs.',
-      time: '5 minutes ago',
-      read: false
-    },
-    {
-      id: 2,
-      type: 'info',
-      title: 'New Integration Available',
-      message: 'WhatsApp Business API integration is now available in your plan.',
-      time: '2 hours ago',
-      read: false
-    },
-    {
-      id: 3,
-      type: 'warning',
-      title: 'Usage Limit Warning',
-      message: 'You have used 80% of your monthly message quota.',
-      time: '1 day ago',
-      read: true
-    },
-    {
-      id: 4,
-      type: 'success',
-      title: 'Report Generated',
-      message: 'Your monthly sales report is ready for download.',
-      time: '2 days ago',
-      read: true
-    },
-    {
-      id: 5,
-      type: 'info',
-      title: 'System Update',
-      message: 'Platform maintenance scheduled for Sunday 2:00 AM - 4:00 AM UTC.',
-      time: '3 days ago',
-      read: true
-    }
-  ]);
+  const [notifications, setNotifications] = useState([]);
 
   const dropdownRef = useRef(null);
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -61,6 +20,27 @@ const NotificationDropdown = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Subscribe to app-wide notifications and basic polling for new messages
+  useEffect(() => {
+    let unsubscribe = () => {};
+    (async () => {
+      try {
+        const mod = await import('../../lib/events');
+        unsubscribe = mod.onEvent('notify', (evt) => {
+          setNotifications((prev) => [{ ...evt, read: false }, ...prev].slice(0, 50));
+        });
+      } catch {}
+    })();
+
+    // Optional polling: if Chats backend supports GET /api/messenger/messages?conversationId=...
+    // here we can poll for a known set of conversations to raise notifications for inbound messages.
+    // Keep it minimal: poll a light endpoint for recent activity if available.
+
+    return () => {
+      try { unsubscribe(); } catch {}
     };
   }, []);
 

@@ -233,6 +233,12 @@ const ContactUploadPage = () => {
     const psid = (c.connectedUserId || '').trim();
     const initialMessage = (window.prompt('Initial message:', 'Hi! This is our assistant. How can we help you today?') || '').trim();
 
+    const notify = (type, title, message) => {
+      import('../../../../lib/events').then(({ emitEvent }) => {
+        emitEvent('notify', { id: Date.now(), type, title, message, time: 'just now' });
+      });
+    };
+
     if (psid) {
       try {
         const r = await fetch(`${API}/api/automation/start-for-contact`, {
@@ -242,13 +248,17 @@ const ContactUploadPage = () => {
         });
         const data = await r.json();
         if (data?.success) {
+          notify('success', 'Campaign started', `Sent to ${name || psid} on Messenger.`);
           alert('Sent now ✅');
         } else if (data?.pending) {
+          notify('info', 'Campaign pending', `Will auto-start when ${name || messenger} messages first.`);
           alert('Pending until user sends first message ⏳');
         } else {
+          notify('warning', 'Failed to start', `Could not start for ${name || psid}.`);
           alert('Failed to start ❌');
         }
       } catch {
+        notify('warning', 'Failed to start', `Could not start for ${name || psid}.`);
         alert('Failed to start ❌');
       }
       return;
@@ -276,11 +286,14 @@ const ContactUploadPage = () => {
         });
         const data = await r.json();
         if (data?.success) {
+          notify('success', 'Campaign started', `Matched and sent to ${name || messenger}.`);
           alert('Matched and sent now ✅');
         } else {
+          notify('info', 'Campaign pending', `Will auto-start when ${name || messenger} messages first.`);
           alert('Pending until user sends first message ⏳');
         }
       } catch {
+        notify('info', 'Campaign pending', `Will auto-start when ${name || messenger} messages first.`);
         alert('Pending until user sends first message ⏳');
       }
       return;
