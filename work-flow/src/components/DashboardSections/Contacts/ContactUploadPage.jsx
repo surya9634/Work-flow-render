@@ -165,6 +165,13 @@ const ContactUploadPage = () => {
 
     let ok = 0, fail = 0, pending = 0;
 
+    // Local helper to push notifications into the navbar dropdown
+    const notify = (type, title, message) => {
+      import('../../../../lib/events').then(({ emitEvent }) => {
+        emitEvent('notify', { id: Date.now() + Math.random(), type, title, message, time: 'just now' });
+      }).catch(() => {});
+    };
+
     for (const c of uploadedContacts) {
       const name = c.name || '';
       const messenger = (c.messenger || '').trim();
@@ -179,9 +186,16 @@ const ContactUploadPage = () => {
             body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage })
           });
           const data = await r.json();
-          if (data && data.success) ok++; else fail++;
+          if (data && data.success) {
+            ok++;
+            notify('success', 'Campaign started', `Sent to ${name || psid} on Messenger.`);
+          } else {
+            fail++;
+            notify('warning', 'Failed to start', `Could not start for ${name || psid}.`);
+          }
         } catch {
           fail++;
+          notify('warning', 'Failed to start', `Could not start for ${name || psid}.`);
         }
         continue;
       }
@@ -203,6 +217,7 @@ const ContactUploadPage = () => {
             body: JSON.stringify(payload)
           });
           pending++;
+          notify('info', 'Campaign pending', `Will auto-start when ${name || messenger} messages first.`);
         } catch {
           // ignore
         }
@@ -215,13 +230,19 @@ const ContactUploadPage = () => {
             body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage })
           });
           const data = await r.json();
-          if (data && data.success) { ok++; } else { /* remains pending */ }
+          if (data && data.success) {
+            ok++;
+            notify('success', 'Campaign started', `Matched and sent to ${name || messenger}.`);
+          } else {
+            // remains pending
+          }
         } catch {
           // remains pending
         }
       }
     }
 
+    notify('info', 'Campaign request', `Requested automation • Sent: ${ok}, Failed: ${fail}, Pending: ${pending}`);
     alert(`Requested automation. Sent now: ${ok}, failed: ${fail}, pending until first message: ${pending}.`);
   };
 
