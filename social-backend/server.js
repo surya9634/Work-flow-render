@@ -249,6 +249,8 @@ const tokenExpirations = new Map(); // key: userId -> timestamp
 const fbConvParticipants = new Map();
 // Per-conversation AI mode switch (true = allow auto-replies)
 const aiModeByConversation = new Map();
+// Track FB users we've already greeted once (per process run)
+const firstMessageReplied = new Set(); // keys like `fb:${senderId}`
 let frontendSocket = null;
 
 io.on('connection', (socket) => {
@@ -2057,6 +2059,25 @@ app.post('/webhook', async (req, res) => {
                 isRead: true,
               }
             });
+            // First-message auto-reply for Facebook Messenger (one-time per sender, per process)
+            if (text && config.facebook.pageToken) {
+              const key = `fb:${senderId}`;
+              if (!firstMessageReplied.has(key)) {
+                try {
+                  const welcome = (process.env.FIRST_MESSAGE_REPLY_TEXT || 'Hi! Thanks for reaching out. How can we help you today?').slice(0, 900);
+                  await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+                    recipient: { id: senderId },
+                    message: { text: welcome },
+                    messaging_type: 'RESPONSE'
+                  }, { params: { access_token: config.facebook.pageToken } });
+                } catch (e) {
+                  console.warn('First-message auto-reply failed:', serializeError(e));
+                } finally {
+                  firstMessageReplied.add(key);
+                }
+              }
+            }
+
             // Optional: auto-reply with Gemini when message text exists and AI mode is ON for this thread
             if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
               try {
