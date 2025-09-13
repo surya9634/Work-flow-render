@@ -39,7 +39,7 @@ const path = require('path');
 let Groq, groq; try { ({ Groq } = require('groq-sdk')); groq = new Groq({ apiKey: process.env.GROQ_API_KEY }); } catch (_) { /* not installed yet */ }
 
 // AI settings
-const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
 const aiModeByPage = Object.create(null); // per Page AI on/off
 const KNOWLEDGE = []; // in-memory feed items { id, title, text, tags }
 let KNOWLEDGE_ID = 1;
@@ -310,6 +310,10 @@ app.post('/api/pages/select', async (req, res) => {
 
     u.page = { id: page.id, name: page.name, access_token: page.access_token };
 
+    // Auto-enable AI mode for this page (can be toggled via /api/ai/mode)
+    aiModeByPage[String(page.id)] = true;
+    console.log(`[AI] Enabled for page ${page.id} (${page.name}) by selection`);
+
     // Subscribe app to this page's webhooks
     try {
       await axios.post(`https://graph.facebook.com/v23.0/${page.id}/subscribed_apps`, null, {
@@ -453,6 +457,7 @@ app.post('/api/messages/send', async (req, res) => {
     if (!pageOwner) return res.status(404).json({ success:false, error: 'page_not_selected' });
 
     const r = await axios.post('https://graph.facebook.com/v23.0/me/messages', {
+      messaging_type: 'RESPONSE',
       recipient: { id: recipientId },
       message: { text }
     }, {
@@ -499,6 +504,9 @@ app.post('/webhook', (req, res) => {
               const aiEnabled = !!aiModeByPage[String(pageId)];
               if (!pageOwner || !aiEnabled || !groq) return;
 
+              // Log to diagnose skipped replies
+              console.log(`[AI] Incoming from ${evt.sender?.id} on page ${pageId}:`, userText);
+
               // Lightweight knowledge retrieval
               const q = userText.toLowerCase();
               const context = KNOWLEDGE
@@ -531,6 +539,7 @@ app.post('/webhook', (req, res) => {
               if (!reply) return;
 
               const r = await axios.post('https://graph.facebook.com/v23.0/me/messages', {
+                messaging_type: 'RESPONSE',
                 recipient: { id: evt.sender.id },
                 message: { text: reply }
               }, {
