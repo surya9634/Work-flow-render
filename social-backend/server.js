@@ -1037,7 +1037,7 @@ async function findThreadIdByPsid(psid) {
 }
 
 // Unified AI generator using Groq GPT-OSS
-async function generateWithGemini(userText, systemPrompt) {
+async function generateWithGemini(userText, systemPrompt) { // uses Groq under the hood
   // Kept function name for backward compatibility; implementation uses Groq
   if (!groqClient) throw new Error('groq_not_configured');
   const messages = [];
@@ -2144,7 +2144,7 @@ app.post('/webhook', async (req, res) => {
                   io.emit('messenger:message_created', { conversationId: threadId, message: aiMsg });
                 }
               } catch (aiErr) {
-                console.warn('Gemini auto-reply failed:', serializeError(aiErr));
+                console.warn('AI auto-reply failed:', serializeError(aiErr));
               }
             }
           } else {
@@ -2370,7 +2370,6 @@ app.post('/api/ai/test', async (req, res) => {
   try {
     const prompt = (req.body && req.body.prompt) || 'Say hello!';
     const systemPrompt = (req.body && req.body.systemPrompt) || '';
-    if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
     if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
     const text = await generateWithGemini(String(prompt), String(systemPrompt));
     return res.json({ text });
