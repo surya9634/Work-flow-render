@@ -35,6 +35,16 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
+// Groq SDK for AI
+let Groq, groq; try { ({ Groq } = require('groq-sdk')); groq = new Groq({ apiKey: process.env.GROQ_API_KEY }); } catch (_) { /* not installed yet */ }
+
+// AI settings
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const aiModeByPage = Object.create(null); // per Page AI on/off
+const KNOWLEDGE = []; // in-memory feed items { id, title, text, tags }
+let KNOWLEDGE_ID = 1;
+
+const WORKFLOW_SYSTEM_PROMPT = `You are Workflow AI Assistant, the official AI chatbot for Workflow — India’s first Sales OS. Keep responses concise for Facebook Messenger.`;
 
 const app = express();
 const server = http.createServer(app);
@@ -389,6 +399,49 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
+// ---- AI: Toggle Mode & Knowledge Feed ----
+app.post('/api/ai/mode', (req, res) => {
+  const { pageId, enabled } = req.body || {};
+  if (!pageId || typeof enabled !== 'boolean') return res.status(400).json({ success:false, error:'pageId and enabled required' });
+  aiModeByPage[String(pageId)] = enabled;
+  res.json({ success:true, pageId, enabled });
+});
+
+app.get('/api/ai/mode', (req, res) => {
+  const pageId = String(req.query.pageId || '');
+  if (!pageId) return res.status(400).json({ success:false, error:'pageId required' });
+  res.json({ success:true, pageId, enabled: !!aiModeByPage[pageId] });
+});
+
+app.post('/api/knowledge', (req, res) => {
+  try {
+    const { title = '', text = '', tags = [] } = req.body || {};
+    if (!text.trim()) return res.status(400).json({ success:false, error:'text required' });
+    const item = { id: KNOWLEDGE_ID++, title: title.trim() || ('Item ' + KNOWLEDGE_ID), text: String(text), tags: Array.isArray(tags)?tags:[] };
+    KNOWLEDGE.push(item);
+    res.json({ success:true, item });
+  } catch (e) {
+    res.status(500).json({ success:false, error:'create_failed' });
+  }
+});
+
+app.get('/api/knowledge/search', (req, res) => {
+  const q = String(req.query.q || '').toLowerCase();
+  if (!q) return res.json({ results: [] });
+  const results = KNOWLEDGE
+    .map(x => ({
+      item: x,
+      score: ((x.title||'').toLowerCase().includes(q) ? 2 : 0)
+           + ((x.text||'').toLowerCase().includes(q) ? 1 : 0)
+           + ((x.tags||[]).some(t => String(t).toLowerCase().includes(q)) ? 1 : 0)
+    }))
+    .filter(x => x.score > 0)
+    .sort((a,b) => b.score - a.score)
+    .slice(0, 5)
+    .map(x => x.item);
+  res.json({ results });
+});
+
 // ---- API: Send Message ----
 app.post('/api/messages/send', async (req, res) => {
   try {
@@ -436,17 +489,58 @@ app.post('/webhook', (req, res) => {
         entry.messaging?.forEach(evt => {
           io.emit('messenger_event', { pageId, evt, type: 'message' });
 
-          // ---- Optional: simple autoresponder ----
-          // if (evt.message && evt.message.text) {
-          //   const text = evt.message.text;
-          //   const pageOwner = Object.values(users).find(u => u.page?.id === String(pageId));
-          //   if (pageOwner) {
-          //     axios.post('https://graph.facebook.com/v23.0/me/messages', {
-          //       recipient: { id: evt.sender.id },
-          //       message: { text: `Auto-reply: you said "${text}"` }
-          //     }, { params: { access_token: pageOwner.page.access_token }}).catch(()=>{});
-          //   }
-          // }
+          // ---- Groq autoresponder (AI Mode) ----
+          (async () => {
+            try {
+              if (!evt.message || !evt.message.text) return;
+              const userText = evt.message.text;
+              const pageOwner = Object.values(users).find(u => u.page?.id === String(pageId));
+              const aiEnabled = !!aiModeByPage[String(pageId)];
+              if (!pageOwner || !aiEnabled || !groq) return;
+
+              // Lightweight knowledge retrieval
+              const q = userText.toLowerCase();
+              const context = KNOWLEDGE
+                .map(x => ({
+                  item: x,
+                  score: ((x.title||'').toLowerCase().includes(q) ? 2 : 0)
+                       + ((x.text||'').toLowerCase().includes(q) ? 1 : 0)
+                       + ((x.tags||[]).some(t => String(t).toLowerCase().includes(q)) ? 1 : 0)
+                }))
+                .filter(x => x.score > 0)
+                .sort((a,b) => b.score - a.score)
+                .slice(0, 3)
+                .map(x => `- ${x.item.title||'Note'}: ${x.item.text}`)
+                .join('\n');
+
+              const completion = await groq.chat.completions.create({
+                model: GROQ_MODEL,
+                temperature: 0.8,
+                max_completion_tokens: 1024,
+                top_p: 1,
+                messages: [
+                  { role: 'system', content: WORKFLOW_SYSTEM_PROMPT },
+                  { role: 'system', content: 'Use the provided context if relevant. If unsure, say: "Please go to our website for more information."' },
+                  { role: 'system', content: `Context:\n${context || 'No extra context'}` },
+                  { role: 'user', content: userText }
+                ],
+              });
+
+              const reply = completion?.choices?.[0]?.message?.content?.trim();
+              if (!reply) return;
+
+              await axios.post('https://graph.facebook.com/v23.0/me/messages', {
+                recipient: { id: evt.sender.id },
+                message: { text: reply }
+              }, {
+                params: { access_token: pageOwner.page.access_token },
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 20000
+              });
+            } catch (err) {
+              console.warn('AI reply failed:', err?.response?.data || err.message);
+            }
+          })();
         });
       });
       return res.sendStatus(200);
