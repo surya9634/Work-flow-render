@@ -45,7 +45,7 @@ const config = {
   },
   ai: {
     groqApiKey: process.env.GROQ_API_KEY || '',
-    groqModel: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+    groqModel: process.env.GROQ_MODEL || 'llama3-70b-8192',
     autoReplyWebhook: String(process.env.AI_AUTO_REPLY_WEBHOOK || '').toLowerCase() === 'true'
   }
 };
@@ -68,8 +68,8 @@ async function generateWithGroq(userPrompt, systemPrompt) {
     temperature: 0.7,
     max_completion_tokens: 1024,
     messages: [
-      { role: 'system', content: String(systemPrompt || '') },
-      { role: 'user', content: String(userPrompt || '') }
+      { role: 'system', content: String(systemPrompt || 'You are a concise business assistant.').slice(0, 4000) },
+      { role: 'user', content: String(userPrompt || '').slice(0, 4000) }
     ]
   });
   return resp?.choices?.[0]?.message?.content?.trim() || '';
@@ -1046,7 +1046,7 @@ async function generateWithGemini(userText, systemPrompt) {
   }
   messages.push({ role: 'user', content: String(userText || '').slice(0, 4000) });
   const resp = await groqClient.chat.completions.create({
-    model: config.ai.groqModel || 'openai/gpt-oss-120b',
+    model: config.ai.groqModel || 'llama3-70b-8192',
     messages,
     temperature: 0.7,
     max_completion_tokens: 512,
@@ -2120,7 +2120,7 @@ app.post('/webhook', async (req, res) => {
                     recipient: { id: senderId },
                     message: { text: reply.slice(0, 900) },
                     messaging_type: 'RESPONSE'
-                  }, { params: { access_token: config.facebook.pageToken } });
+                  }, { params: { access_token: config.facebook.pageToken }, headers: { 'Content-Type': 'application/json' } });
                   const aiNow = new Date().toISOString();
                   // Persist AI reply for FB, compute response time
                   const arr1 = messengerStore.messages.get(threadId) || [];
