@@ -493,6 +493,7 @@ app.post('/webhook', (req, res) => {
           (async () => {
             try {
               if (!evt.message || !evt.message.text) return;
+              if (evt.message.is_echo) return; // ignore page echoes to prevent loops
               const userText = evt.message.text;
               const pageOwner = Object.values(users).find(u => u.page?.id === String(pageId));
               const aiEnabled = !!aiModeByPage[String(pageId)];
@@ -529,13 +530,25 @@ app.post('/webhook', (req, res) => {
               const reply = completion?.choices?.[0]?.message?.content?.trim();
               if (!reply) return;
 
-              await axios.post('https://graph.facebook.com/v23.0/me/messages', {
+              const r = await axios.post('https://graph.facebook.com/v23.0/me/messages', {
                 recipient: { id: evt.sender.id },
                 message: { text: reply }
               }, {
                 params: { access_token: pageOwner.page.access_token },
                 headers: { 'Content-Type': 'application/json' },
                 timeout: 20000
+              });
+
+              // notify clients so app chat shows the AI reply immediately
+              io.emit('messenger_event', {
+                pageId,
+                evt: {
+                  sender: { id: 'PAGE' },
+                  recipient: { id: evt.sender.id },
+                  message: { text: reply, mid: r?.data?.message_id || null, is_echo: true },
+                  timestamp: Date.now()
+                },
+                type: 'message'
               });
             } catch (err) {
               console.warn('AI reply failed:', err?.response?.data || err.message);
