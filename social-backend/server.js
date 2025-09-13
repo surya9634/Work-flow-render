@@ -44,10 +44,36 @@ const config = {
     verifyToken: process.env.WEBHOOK_VERIFY_TOKEN || 'WORKFLOW_VERIFY_TOKEN',
   },
   ai: {
-    geminiKey: process.env.GEMINI_API_KEY || '',
+    groqApiKey: process.env.GROQ_API_KEY || '',
+    groqModel: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     autoReplyWebhook: String(process.env.AI_AUTO_REPLY_WEBHOOK || '').toLowerCase() === 'true'
   }
 };
+
+// Initialize Groq client
+let groqClient = null;
+try {
+  const { Groq } = require('groq-sdk');
+  groqClient = new Groq({ apiKey: (config.ai.groqApiKey || process.env.GROQ_API_KEY || '').trim() });
+} catch (e) {
+  console.warn('groq-sdk not installed. Run: npm i groq-sdk');
+}
+
+// Helper: generate text with Groq GPT-OSS
+async function generateWithGroq(userPrompt, systemPrompt) {
+  if (!groqClient) throw new Error('groq_not_configured');
+  const model = config.ai.groqModel || 'openai/gpt-oss-120b';
+  const resp = await groqClient.chat.completions.create({
+    model,
+    temperature: 0.7,
+    max_completion_tokens: 1024,
+    messages: [
+      { role: 'system', content: String(systemPrompt || '') },
+      { role: 'user', content: String(userPrompt || '') }
+    ]
+  });
+  return resp?.choices?.[0]?.message?.content?.trim() || '';
+}
 
 // Helper to choose WhatsApp credentials by mode
 function getWhatsappCreds(preferredMode) {
@@ -920,7 +946,7 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
     // If running locally (not FB/WA thread), simulate a customer message to kick off AI
     try {
       const isLocalConv = !String(conversationId).startsWith('wa_') && config.facebook.provider !== 'facebook';
-      if (isLocalConv && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
+      if (isLocalConv && groqClient && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
         const customerText = campaign?.flow?.objective
           ? `Hi, I want to know more about ${campaign.flow.objective}.`
           : 'Hi, can you tell me more?';
@@ -936,10 +962,10 @@ app.post('/api/campaigns/:id/start', async (req, res) => {
         saveMessengerStore();
         io.emit('messenger:message_created', { conversationId, message: custMsg });
 
-        // Generate AI reply
+        // Generate AI reply (Groq GPT-OSS)
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
         const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
-        const replyText = await generateWithGemini(String(customerText), baseSystem);
+        const replyText = await generateWithGroq(String(customerText), baseSystem);
         if (replyText) {
           const aiMsg = { id: 'ai_' + (Date.now() + 1), sender: 'ai', text: replyText, timestamp: new Date().toISOString(), isRead: true };
           arr.push(aiMsg);
@@ -1010,20 +1036,24 @@ async function findThreadIdByPsid(psid) {
   }
 }
 
+// Unified AI generator using Groq GPT-OSS
 async function generateWithGemini(userText, systemPrompt) {
-  if (!config.ai.geminiKey) throw new Error('gemini_key_missing');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(config.ai.geminiKey)}`;
-  const payload = {
-    contents: [
-      { role: 'user', parts: [{ text: String(userText || '').slice(0, 4000) }] }
-    ]
-  };
+  // Kept function name for backward compatibility; implementation uses Groq
+  if (!groqClient) throw new Error('groq_not_configured');
+  const messages = [];
   if (systemPrompt && String(systemPrompt).trim()) {
-    payload.systemInstruction = { role: 'system', parts: [{ text: String(systemPrompt).slice(0, 8000) }] };
+    messages.push({ role: 'system', content: String(systemPrompt).slice(0, 8000) });
   }
-  const resp = await axios.post(url, payload, { headers: { 'Content-Type': 'application/json' } });
-  const text = resp?.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return text.trim();
+  messages.push({ role: 'user', content: String(userText || '').slice(0, 4000) });
+  const resp = await groqClient.chat.completions.create({
+    model: config.ai.groqModel || 'openai/gpt-oss-120b',
+    messages,
+    temperature: 0.7,
+    max_completion_tokens: 512,
+    top_p: 1
+  });
+  const txt = resp?.choices?.[0]?.message?.content || '';
+  return String(txt).trim();
 }
 
 app.get('/api/messenger/conversations', async (_req, res) => {
@@ -1280,7 +1310,7 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
   try {
     const { conversationId, lastUserMessage, systemPrompt } = req.body || {};
     if (!conversationId) return res.status(400).json({ error: 'conversationId required' });
-    if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
+    if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
     // Respect AI mode switch: do not generate if disabled
     if (aiModeByConversation.get(conversationId) !== true) {
       return res.status(400).json({ error: 'ai_mode_disabled' });
@@ -1430,7 +1460,7 @@ app.post('/api/messenger/send-message', async (req, res) => {
     io.emit('messenger:message_created', { conversationId, message: msg });
 
     // Auto-reply for local provider when customer sends a message
-    if ((senderNorm === 'customer') && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
+    if ((senderNorm === 'customer') && groqClient && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
       try {
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
         const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
@@ -1934,7 +1964,7 @@ app.post('/webhook', async (req, res) => {
             io.emit('messenger:message_created', { conversationId: convId, message: msg });
 
             // AI auto-reply if enabled (and AI mode ON for this conversation)
-            if (text && config.ai.geminiKey && config.ai.autoReplyWebhook && (aiModeByConversation.get(convId) === true)) {
+            if (text && groqClient && config.ai.autoReplyWebhook && (aiModeByConversation.get(convId) === true)) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
                 const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
@@ -2078,8 +2108,8 @@ app.post('/webhook', async (req, res) => {
               }
             }
 
-            // Optional: auto-reply with Gemini when message text exists and AI mode is ON for this thread
-            if (text && config.ai.geminiKey && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
+            // Optional: auto-reply with Groq when message text exists and AI mode is ON for this thread
+            if (text && groqClient && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
               try {
                 const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
                 const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
@@ -2341,6 +2371,7 @@ app.post('/api/ai/test', async (req, res) => {
     const prompt = (req.body && req.body.prompt) || 'Say hello!';
     const systemPrompt = (req.body && req.body.systemPrompt) || '';
     if (!config.ai.geminiKey) return res.status(400).json({ error: 'gemini_not_configured' });
+    if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
     const text = await generateWithGemini(String(prompt), String(systemPrompt));
     return res.json({ text });
   } catch (err) {
