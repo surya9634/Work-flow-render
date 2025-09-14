@@ -97,6 +97,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Initialize local stores on boot
+try { loadMessengerStore(); } catch (_) {}
+try { ensureDir(path.dirname(profilePromptsFile)); readJsonSafeEnsure(profilePromptsFile, { profiles: {} }); } catch (_) {}
+
 // --- Minimal in-memory auth + onboarding for demo ---
 const authStore = {
   usersByEmail: new Map(), // email -> user
@@ -627,6 +631,7 @@ app.get('/api/integrations/status', (req, res) => {
 // Messenger data store with JSON persistence
 const dataDir = path.join(__dirname, 'data');
 const messengerFile = path.join(dataDir, 'messenger.json');
+const profilePromptsFile = path.join(dataDir, 'profilePrompts.json');
 
 function ensureDir(p) {
   try { fs.mkdirSync(p, { recursive: true }); } catch (_) {}
@@ -639,6 +644,21 @@ function readJsonSafe(file, fallback) {
     return JSON.parse(raw);
   } catch (e) {
     console.error('Failed to read JSON', file, e.message);
+    return fallback;
+  }
+}
+
+function readJsonSafeEnsure(file, fallback) {
+  try {
+    if (!fs.existsSync(file)) {
+      ensureDir(path.dirname(file));
+      fs.writeFileSync(file, JSON.stringify(fallback, null, 2));
+      return fallback;
+    }
+    const raw = fs.readFileSync(file, 'utf-8');
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Failed to read JSON (ensure)', file, e.message);
     return fallback;
   }
 }
@@ -664,7 +684,7 @@ const messengerStore = {
 const lastCustomerAtByConversation = new Map();
 
 function loadMessengerStore() {
-  const json = readJsonSafe(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {}, pendingAutoStart: {} });
+  const json = readJsonSafeEnsure(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {}, pendingAutoStart: {} });
   messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
   messengerStore.messages = new Map(Object.entries(json.messages));
   messengerStore.systemPrompts = new Map(Object.entries(json.systemPrompts || {}));
@@ -1204,9 +1224,37 @@ Return ONLY JSON.`;
   }
 });
 
+// Per-profile system prompts store (Render Persistent Disk friendly)
+// Schema: { profiles: { [profileId: string]: { systemPrompt: string, updatedAt: ISO, sources?: any[] } } }
+app.get('/api/profiles/prompts', (_req, res) => {
+  try {
+    const data = readJsonSafeEnsure(profilePromptsFile, { profiles: {} });
+    return res.json(data);
+  } catch (e) {
+    return res.status(500).json({ error: 'read_failed' });
+  }
+});
+app.post('/api/profiles/prompts', (req, res) => {
+  try {
+    const { profileId, systemPrompt, sources } = req.body || {};
+    if (!profileId) return res.status(400).json({ error: 'profileId required' });
+    const data = readJsonSafeEnsure(profilePromptsFile, { profiles: {} });
+    data.profiles = data.profiles || {};
+    data.profiles[String(profileId)] = {
+      systemPrompt: String(systemPrompt || ''),
+      updatedAt: new Date().toISOString(),
+      ...(sources ? { sources } : {})
+    };
+    writeJsonSafe(profilePromptsFile, data);
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'write_failed' });
+  }
+});
+
 // Create conversation
 app.post('/api/messenger/conversations', (req, res) => {
-  const { name, username, profilePic, autoStartIfFirstMessage, systemPrompt, initialMessage } = req.body || {};
+  const { name, username, profilePic, autoStartIfFirstMessage, systemPrompt, initialMessage, profileId } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name required' });
   const id = 'conv_' + Date.now();
   const conv = {
@@ -1220,7 +1268,14 @@ app.post('/api/messenger/conversations', (req, res) => {
   };
   messengerStore.conversations.set(id, conv);
   messengerStore.messages.set(id, []);
-  messengerStore.systemPrompts.set(id, '');
+  // If a profileId is supplied and we have a saved system prompt for that profile, seed it for this conversation
+  try {
+    const profiles = readJsonSafeEnsure(profilePromptsFile, { profiles: {} });
+    const sp = profiles?.profiles?.[String(profileId || '')]?.systemPrompt || '';
+    messengerStore.systemPrompts.set(id, String(systemPrompt || sp || ''));
+  } catch (_) {
+    messengerStore.systemPrompts.set(id, String(systemPrompt || ''));
+  }
   aiModeByConversation.set(id, false); // default OFF until user enables
   // If requested, remember by normalized name so that on first inbound message AI turns on and sends initialMessage
   if (autoStartIfFirstMessage === true && (username || name)) {
@@ -1235,7 +1290,7 @@ app.post('/api/messenger/conversations', (req, res) => {
 // Start automation for a specific contact (by PSID or by matching username to existing convs)
 app.post('/api/automation/start-for-contact', async (req, res) => {
   try {
-    const { name, messenger, connectedUserId, initialMessage } = req.body || {};
+    const { name, messenger, connectedUserId, initialMessage, profileId } = req.body || {};
     if (config.facebook.provider !== 'facebook' || !config.facebook.pageId || !config.facebook.pageToken) {
       return res.status(400).json({ success: false, message: 'facebook_not_configured' });
     }
@@ -1280,6 +1335,14 @@ app.post('/api/automation/start-for-contact', async (req, res) => {
     // Enable AI mode for this thread and send initial message
     fbConvParticipants.set(threadId, psid);
     aiModeByConversation.set(threadId, true);
+    // If profileId provided, set system prompt for this thread from profilePrompts.json unless already set
+    try {
+      const profiles = readJsonSafeEnsure(profilePromptsFile, { profiles: {} });
+      const sp = profiles?.profiles?.[String(profileId || '')]?.systemPrompt;
+      if (sp && !messengerStore.systemPrompts.get(threadId)) {
+        messengerStore.systemPrompts.set(threadId, String(sp));
+      }
+    } catch (_) {}
     const text = String(initialMessage || `Hi ${name || ''}! How can we help you today?`).trim().slice(0, 900);
     await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
       recipient: { id: psid },

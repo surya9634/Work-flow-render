@@ -19,28 +19,43 @@ const AIFineTuning = () => {
     setSelectedSource(null);
   };
 
-  const handleContentSubmit = (sourceType, data) => {
-    // Process the submitted content based on type
+  const handleContentSubmit = async (sourceType, data) => {
     const newItem = {
       id: Date.now(),
       type: sourceType,
       data,
       status: 'processing',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    
-    setContentItems(prev => [...prev, newItem]);
-    
-    // Simulate processing
-    setTimeout(() => {
-      setContentItems(prev => 
-        prev.map(item => 
-          item.id === newItem.id 
-            ? { ...item, status: 'completed' }
-            : item
-        )
+    setContentItems((prev) => [...prev, newItem]);
+
+    try {
+      // Build a simple system prompt from provided sources
+      let systemPrompt = '';
+      if (sourceType === 'text') systemPrompt = String(data?.text || '').slice(0, 4000);
+      if (sourceType === 'url') systemPrompt = `Use knowledge from: ${(data?.urls || []).filter(Boolean).join(', ')}`;
+      if (sourceType === 'qa') {
+        const pairs = (data?.qaItems || []).map(q => `Q: ${q?.question}\nA: ${q?.answer}`).join('\n\n');
+        systemPrompt = `Key Q&A:\n${pairs}`.slice(0, 4000);
+      }
+      if (sourceType === 'file') systemPrompt = 'Files uploaded; summarize and use their content for responses.';
+
+      const API = import.meta.env.VITE_API_BASE || '';
+      const profileId = 'default'; // you can replace with actual selected profile later
+      await fetch(`${API}/api/profiles/prompts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId, systemPrompt, sources: [{ type: sourceType, data }] }),
+      });
+
+      setContentItems((prev) =>
+        prev.map((item) => (item.id === newItem.id ? { ...item, status: 'completed' } : item))
       );
-    }, 2000);
+    } catch (e) {
+      setContentItems((prev) =>
+        prev.map((item) => (item.id === newItem.id ? { ...item, status: 'error' } : item))
+      );
+    }
   };
 
   const getStatusIcon = (status) => {

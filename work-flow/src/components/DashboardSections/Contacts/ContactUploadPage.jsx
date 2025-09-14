@@ -209,7 +209,8 @@ const ContactUploadPage = () => {
             username: messenger,
             autoStartIfFirstMessage: true,
             systemPrompt: '',
-            initialMessage
+            initialMessage,
+            profileId: 'default'
           };
           await fetch(`${API}/api/messenger/conversations`, {
             method: 'POST',
@@ -227,7 +228,7 @@ const ContactUploadPage = () => {
           const r = await fetch(`${API}/api/automation/start-for-contact`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage })
+            body: JSON.stringify({ name, messenger, connectedUserId: '', initialMessage, profileId: 'default' })
           });
           const data = await r.json();
           if (data && data.success) {
@@ -265,7 +266,7 @@ const ContactUploadPage = () => {
         const r = await fetch(`${API}/api/automation/start-for-contact`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage })
+          body: JSON.stringify({ name, messenger, connectedUserId: psid, initialMessage, profileId: 'default' })
         });
         const data = await r.json();
         if (data?.success) {
