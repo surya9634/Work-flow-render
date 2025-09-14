@@ -2089,24 +2089,7 @@ app.post('/webhook', async (req, res) => {
                 isRead: true,
               }
             });
-            // First-message auto-reply for Facebook Messenger (one-time per sender, per process)
-            if (text && config.facebook.pageToken) {
-              const key = `fb:${senderId}`;
-              if (!firstMessageReplied.has(key)) {
-                try {
-                  const welcome = (process.env.FIRST_MESSAGE_REPLY_TEXT || 'Hi! Thanks for reaching out. How can we help you today?').slice(0, 900);
-                  await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
-                    recipient: { id: senderId },
-                    message: { text: welcome },
-                    messaging_type: 'RESPONSE'
-                  }, { params: { access_token: config.facebook.pageToken } });
-                } catch (e) {
-                  console.warn('First-message auto-reply failed:', serializeError(e));
-                } finally {
-                  firstMessageReplied.add(key);
-                }
-              }
-            }
+            // First-message auto-reply removed: only AI replies when AI mode is ON.
 
             // Optional: auto-reply with Groq when message text exists and AI mode is ON for this thread
             if (text && groqClient && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
