@@ -167,7 +167,7 @@ const ContactUploadPage = () => {
 
     // Local helper to push notifications into the navbar dropdown
     const notify = (type, title, message) => {
-      import('../../lib/events').then(({ emitEvent }) => {
+      import('../../../lib/events').then(({ emitEvent }) => {
         emitEvent('notify', { id: Date.now() + Math.random(), type, title, message, time: 'just now' });
       }).catch(() => {});
     };
@@ -256,7 +256,7 @@ const ContactUploadPage = () => {
     const initialMessage = (window.prompt('Initial message:', 'Hi! This is our assistant. How can we help you today?') || '').trim();
 
     const notify = (type, title, message) => {
-      import('../../lib/events').then(({ emitEvent }) => {
+      import('../../../lib/events').then(({ emitEvent }) => {
         emitEvent('notify', { id: Date.now(), type, title, message, time: 'just now' });
       }).catch(() => {});
     };
