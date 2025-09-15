@@ -22,7 +22,7 @@ const ContactUploadPage = () => {
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragActive(false);
+    setDragActive(false); 
     
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFile(e.dataTransfer.files[0]);
@@ -308,3 +308,4 @@ const ContactUploadPage = () => {
 };
 
 export default ContactUploadPage;
+Requested automation. Sent now: 0, failed: 0, pending until first message: 1.

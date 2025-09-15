@@ -100,6 +100,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Initialize local stores on boot
 try { loadMessengerStore(); } catch (_) {}
 try { ensureDir(path.dirname(profilePromptsFile)); readJsonSafeEnsure(profilePromptsFile, { profiles: {} }); } catch (_) {}
+try { ensureDir(path.dirname(userMemoriesFile)); readJsonSafeEnsure(userMemoriesFile, { users: {} }); } catch (_) {}
 
 // --- Minimal in-memory auth + onboarding for demo ---
 const authStore = {
@@ -632,6 +633,7 @@ app.get('/api/integrations/status', (req, res) => {
 const dataDir = path.join(__dirname, 'data');
 const messengerFile = path.join(dataDir, 'messenger.json');
 const profilePromptsFile = path.join(dataDir, 'profilePrompts.json');
+const userMemoriesFile = path.join(dataDir, 'userMemories.json');
 
 function ensureDir(p) {
   try { fs.mkdirSync(p, { recursive: true }); } catch (_) {}
@@ -1247,6 +1249,112 @@ app.post('/api/profiles/prompts', (req, res) => {
     };
     writeJsonSafe(profilePromptsFile, data);
     return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'write_failed' });
+  }
+});
+
+// Per-user memories (local DB). Schema: { users: { [userId: string]: { memories: Memory[] } } }
+// Memory: { id, title, type: 'text'|'url'|'file'|'qa', data, createdAt, updatedAt }
+app.get('/api/users/:userId/memories', (req, res) => {
+  try {
+    const db = readJsonSafeEnsure(userMemoriesFile, { users: {} });
+    const userId = String(req.params.userId || '');
+    const arr = db.users?.[userId]?.memories || [];
+    return res.json({ memories: arr });
+  } catch (e) {
+    return res.status(500).json({ error: 'read_failed' });
+  }
+});
+app.post('/api/users/:userId/memories', (req, res) => {
+  try {
+    const db = readJsonSafeEnsure(userMemoriesFile, { users: {} });
+    const userId = String(req.params.userId || '');
+    const { title, type, data } = req.body || {};
+    if (!title || !type) return res.status(400).json({ error: 'title_and_type_required' });
+    const id = 'mem_' + Date.now();
+    const now = new Date().toISOString();
+    db.users = db.users || {};
+    db.users[userId] = db.users[userId] || { memories: [] };
+    db.users[userId].memories.push({ id, title: String(title), type: String(type), data: data || null, createdAt: now, updatedAt: now });
+    writeJsonSafe(userMemoriesFile, db);
+    return res.json({ success: true, id });
+  } catch (e) {
+    return res.status(500).json({ error: 'write_failed' });
+  }
+});
+app.put('/api/users/:userId/memories/:id', (req, res) => {
+  try {
+    const db = readJsonSafeEnsure(userMemoriesFile, { users: {} });
+    const userId = String(req.params.userId || '');
+    const id = String(req.params.id || '');
+    const { title, data } = req.body || {};
+    const list = db.users?.[userId]?.memories || [];
+    const idx = list.findIndex(m => m.id === id);
+    if (idx === -1) return res.status(404).json({ error: 'not_found' });
+    const now = new Date().toISOString();
+    if (typeof title === 'string') list[idx].title = title;
+    if (typeof data !== 'undefined') list[idx].data = data;
+    list[idx].updatedAt = now;
+    db.users[userId].memories = list;
+    writeJsonSafe(userMemoriesFile, db);
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'write_failed' });
+  }
+});
+app.delete('/api/users/:userId/memories/:id', (req, res) => {
+  try {
+    const db = readJsonSafeEnsure(userMemoriesFile, { users: {} });
+    const userId = String(req.params.userId || '');
+    const id = String(req.params.id || '');
+    const list = db.users?.[userId]?.memories || [];
+    const after = list.filter(m => m.id !== id);
+    db.users = db.users || {};
+    db.users[userId] = db.users[userId] || { memories: [] };
+    db.users[userId].memories = after;
+    writeJsonSafe(userMemoriesFile, db);
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ error: 'write_failed' });
+  }
+});
+
+// Apply a user memory into a profile's systemPrompt (append or replace)
+app.post('/api/users/:userId/memories/:id/apply-to-profile', (req, res) => {
+  try {
+    const userId = String(req.params.userId || '');
+    const id = String(req.params.id || '');
+    const { profileId, mode } = req.body || {}; // mode: 'append'|'replace'
+    if (!profileId) return res.status(400).json({ error: 'profileId required' });
+
+    const memDb = readJsonSafeEnsure(userMemoriesFile, { users: {} });
+    const mem = (memDb.users?.[userId]?.memories || []).find(m => m.id === id);
+    if (!mem) return res.status(404).json({ error: 'memory_not_found' });
+
+    const profiles = readJsonSafeEnsure(profilePromptsFile, { profiles: {} });
+    profiles.profiles = profiles.profiles || {};
+    const existing = profiles.profiles[String(profileId)]?.systemPrompt || '';
+
+    const toText = (m) => {
+      if (m.type === 'qa') {
+        const pairs = (m.data?.qaItems || []).map(q => `Q: ${q?.question}\nA: ${q?.answer}`).join('\n\n');
+        return `Key Q&A (from ${m.title}):\n${pairs}`;
+      }
+      if (m.type === 'url') return `Use knowledge from these URLs (from ${m.title}): ${(m.data?.urls || []).filter(Boolean).join(', ')}`;
+      if (m.type === 'file') return `Files uploaded in ${m.title} were summarized; use their content.`;
+      return String(m.data?.text || '').slice(0, 8000);
+    };
+
+    const memText = toText(mem);
+    const systemPrompt = mode === 'replace' ? memText : `${existing}\n\n${memText}`.trim().slice(0, 8000);
+
+    profiles.profiles[String(profileId)] = {
+      systemPrompt,
+      updatedAt: new Date().toISOString()
+    };
+    writeJsonSafe(profilePromptsFile, profiles);
+    return res.json({ success: true, profileId });
   } catch (e) {
     return res.status(500).json({ error: 'write_failed' });
   }
