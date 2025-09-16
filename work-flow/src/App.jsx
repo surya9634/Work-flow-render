@@ -59,6 +59,8 @@ const OnboardingRoute = ({ children }) => {
   return children;
 };
 
+import AssistantSidebar from './components/AssistantSidebar/AssistantSidebar.jsx';
+
 function App() {
   return (
     <Router>
@@ -118,6 +120,9 @@ function App() {
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {/* Brave-like assistant sidebar, absolutely positioned, no layout shift */}
+      <AssistantSidebar />
     </Router>
   );
 }
