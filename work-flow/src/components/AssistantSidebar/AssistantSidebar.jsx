@@ -28,13 +28,13 @@ export default function AssistantSidebar() {
   useEffect(() => {
     // Preload with a greeting when first opened
     if (open && messages.length === 0) {
-      const appGuide = `You are Workflow Assistant, an in-app copilot for the Work-flow platform.
-- Speak emotionally warm yet professional.
-- Always be concise but helpful.
-- Understand the current tab/route and tailor answers accordingly.
-- If the user asks about the current tab, explain its purpose, key actions, and common pitfalls.
+      const appGuide = `You are Workflow Assistant, the in-app copilot for the Work-flow platform.
+- Tone: emotionally warm yet professional.
+- Be concise and helpful.
+- IMPORTANT: Do NOT discuss the current page or tab unless the user explicitly asks about the page/tab; otherwise answer normally.
+- If the user asks about the current page, tailor answers to that tab with purpose, key actions, and common pitfalls.
 - You can analyze pasted reports or datasets and provide insights, summaries, and recommendations.
-- If you need more data, ask a brief follow-up question.
+- Ask brief follow-up questions when needed.
 - Never expose internal tokens or secrets.`;
       setMessages([
         { id: 'sys1', role: 'system', content: appGuide },
@@ -54,7 +54,11 @@ export default function AssistantSidebar() {
     try {
       // Reuse existing simple AI endpoint with richer system prompt + page context
       const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
-      const finalPrompt = `${systemPrompt}\n\nContext:\n${pageContext}\n\nUser:\n${text}`;
+      // Only include page context if user explicitly references the page/tab
+      const mentionsPage = /\b(page|this page|current page|tab|this tab|dashboard|admin|onboarding|ai chat)\b/i.test(text);
+      const finalPrompt = mentionsPage
+        ? `${systemPrompt}\n\nContext:\n${pageContext}\n\nUser:\n${text}`
+        : `${systemPrompt}\n\nUser:\n${text}`;
       const res = await apiFetch('/api/ai/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -117,7 +121,8 @@ export default function AssistantSidebar() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: `We uploaded files for analysis: ${names}. Summarize insights.`,
-          context: pageContext,
+          // Do not include page context here unless user specifically asked about the page
+          context: '',
           systemPrompt,
         })
       });
@@ -180,7 +185,40 @@ export default function AssistantSidebar() {
           {messages.map(m => (
             <div key={m.id} className={m.role === 'user' ? 'text-right' : 'text-left'}>
               <div className={`inline-block max-w-[85%] whitespace-pre-wrap text-sm rounded-lg px-3 py-2 ${m.role === 'user' ? 'bg-indigo-600 text-white' : m.role === 'assistant' ? 'bg-gray-100 text-gray-900' : 'bg-amber-50 text-amber-900'}`}>
-                {m.content}
+                {(() => {
+                  // Minimal markdown: **bold**, ## / ### headings
+                  const renderInline = (str) => {
+                    const parts = [];
+                    const regex = /\*\*(.+?)\*\*/g; // capture **bold**
+                    let last = 0;
+                    let match;
+                    while ((match = regex.exec(str)) !== null) {
+                      if (match.index > last) parts.push(str.slice(last, match.index));
+                      parts.push(<strong key={`b-${match.index}`}>{match[1]}</strong>);
+                      last = regex.lastIndex;
+                    }
+                    if (last < str.length) parts.push(str.slice(last));
+                    return parts;
+                  };
+
+                  return m.content.split('\n').map((line, i) => {
+                    if (line.startsWith('### ')) {
+                      return (
+                        <div key={i} className="font-semibold text-base leading-snug">
+                          {renderInline(line.slice(4))}
+                        </div>
+                      );
+                    }
+                    if (line.startsWith('## ')) {
+                      return (
+                        <div key={i} className="font-bold text-lg leading-snug">
+                          {renderInline(line.slice(3))}
+                        </div>
+                      );
+                    }
+                    return <div key={i}>{renderInline(line)}</div>;
+                  });
+                })()}
               </div>
             </div>
           ))}
