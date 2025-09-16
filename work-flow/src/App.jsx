@@ -80,48 +80,50 @@ function App() {
         }}
       />
 
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
+      <div id="app-content" style={{ marginRight: 'var(--assistant-offset, 0px)' }} className="transition-[margin] duration-300 ease-in-out">
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
 
-        {/* Onboarding route - only accessible to authenticated users who haven't completed onboarding */}
-        <Route
-          path="/onboarding"
-          element={
-            <ProtectedRoute>
-              <OnboardingForm />
-            </ProtectedRoute>
-          }
-        />
+          {/* Onboarding route - only accessible to authenticated users who haven't completed onboarding */}
+          <Route
+            path="/onboarding"
+            element={
+              <ProtectedRoute>
+                <OnboardingForm />
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Regular user and admin route - with onboarding check */}
-        <Route
-          path="/dashboard/*"
-          element={
-            <ProtectedRoute>
-              <OnboardingRoute>
-                <Dashboard />
-              </OnboardingRoute>
-            </ProtectedRoute>
-          }
-        />
+          {/* Regular user and admin route - with onboarding check */}
+          <Route
+            path="/dashboard/*"
+            element={
+              <ProtectedRoute>
+                <OnboardingRoute>
+                  <Dashboard />
+                </OnboardingRoute>
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Admin-only route */}
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute adminOnly={true}>
-              <AdminDashboard />
-            </ProtectedRoute>
-          }
-        />
+          {/* Admin-only route */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute adminOnly={true}>
+                <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route path="/ai-chat" element={<AIChat />} />
+          <Route path="/ai-chat" element={<AIChat />} />
 
-        {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
 
-      {/* Brave-like assistant sidebar, absolutely positioned, no layout shift */}
+      {/* Assistant sidebar shifts layout via CSS var --assistant-offset */}
       <AssistantSidebar />
     </Router>
   );

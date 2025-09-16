@@ -15,15 +15,30 @@ export default function AssistantSidebar() {
     if (typeof window === 'undefined') return '';
     const title = document.title || '';
     const url = window.location.href || '';
-    return `Page: ${title}\nURL: ${url}`;
+    // derive active tab from route path
+    const path = window.location.pathname || '';
+    let tab = 'Landing';
+    if (path.startsWith('/dashboard')) tab = 'Dashboard';
+    else if (path === '/admin') tab = 'Admin';
+    else if (path === '/onboarding') tab = 'Onboarding';
+    else if (path === '/ai-chat') tab = 'AI Chat';
+    return `Page: ${title}\nURL: ${url}\nActiveTab: ${tab}`;
   }, []);
 
   useEffect(() => {
     // Preload with a greeting when first opened
     if (open && messages.length === 0) {
+      const appGuide = `You are Workflow Assistant, an in-app copilot for the Work-flow platform.
+- Speak emotionally warm yet professional.
+- Always be concise but helpful.
+- Understand the current tab/route and tailor answers accordingly.
+- If the user asks about the current tab, explain its purpose, key actions, and common pitfalls.
+- You can analyze pasted reports or datasets and provide insights, summaries, and recommendations.
+- If you need more data, ask a brief follow-up question.
+- Never expose internal tokens or secrets.`;
       setMessages([
-        { id: 'sys1', role: 'system', content: 'You are an AI assistant pinned to the right sidebar. Help briefly and clearly.' },
-        { id: 'as1', role: 'assistant', content: 'Hi! I\'m here to help. Ask about this page or anything else.' },
+        { id: 'sys1', role: 'system', content: appGuide },
+        { id: 'as1', role: 'assistant', content: 'Hi! I\'m your Workflow Assistant. How can I support you right now?' },
       ]);
     }
   }, [open]);
@@ -37,11 +52,13 @@ export default function AssistantSidebar() {
     setMessages(prev => [...prev, { id: uid, role: 'user', content: text }]);
     setLoading(true);
     try {
-      // Reuse existing simple AI endpoint
+      // Reuse existing simple AI endpoint with richer system prompt + page context
+      const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+      const finalPrompt = `${systemPrompt}\n\nContext:\n${pageContext}\n\nUser:\n${text}`;
       const res = await apiFetch('/api/ai/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: `${pageContext}\n\nUser: ${text}` })
+        body: JSON.stringify({ prompt: finalPrompt })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'AI request failed');
@@ -63,15 +80,55 @@ export default function AssistantSidebar() {
 
   const handleAttachClick = () => fileInputRef.current?.click();
 
+  // Keep app content width responsive to sidebar state
+  useEffect(() => {
+    const setOffset = () => {
+      const offset = open ? Math.min(Math.max(window.innerWidth * 0.2, 320), 560) : 0;
+      document.documentElement.style.setProperty('--assistant-offset', `${offset}px`);
+    };
+    setOffset();
+    window.addEventListener('resize', setOffset);
+    return () => window.removeEventListener('resize', setOffset);
+  }, [open]);
+
   const handleFiles = async (files) => {
     if (!files || files.length === 0) return;
-    // Display file names locally; hook up to backend when upload endpoint is ready
-    const names = Array.from(files).map(f => f.name).join(', ');
-    setMessages(prev => [
-      ...prev,
-      { id: `u_file_${Date.now()}`, role: 'user', content: `Attached files: ${names}` },
-    ]);
-    // TODO: Integrate with backend file upload endpoint when available
+    const form = new FormData();
+    Array.from(files).forEach(f => form.append('files', f));
+
+    try {
+      setLoading(true);
+      setError('');
+      // 1) Upload files
+      const uploadRes = await fetch(`${API_URL || ''}/api/assistant/upload`, { method: 'POST', body: form });
+      const uploadJson = await uploadRes.json();
+      if (!uploadRes.ok || !uploadJson?.success) throw new Error('Upload failed');
+
+      const names = (uploadJson.files || []).map(f => `${f.originalname} (${Math.round(f.size/1024)} KB)`).join(', ');
+      setMessages(prev => [
+        ...prev,
+        { id: `u_file_${Date.now()}`, role: 'user', content: `Analyze this report/data: ${names}` },
+      ]);
+
+      // 2) Ask AI to analyze based on filenames (placeholder until parsing is added)
+      const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
+      const analyzeRes = await apiFetch('/api/assistant/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `We uploaded files for analysis: ${names}. Summarize insights.`,
+          context: pageContext,
+          systemPrompt,
+        })
+      });
+      const analyzeJson = await analyzeRes.json();
+      if (!analyzeRes.ok) throw new Error(analyzeJson?.error || 'Analyze failed');
+      setMessages(prev => [...prev, { id: `a_${Date.now()}`, role: 'assistant', content: analyzeJson.text || 'No analysis' }]);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -87,7 +144,13 @@ export default function AssistantSidebar() {
 
       {/* Sidebar Panel */}
       <div
-        className={`fixed top-0 right-0 h-screen w-[28rem] max-w-[90vw] bg-white border-l border-gray-200 z-[59] transition-transform duration-300 ease-in-out shadow-xl flex flex-col ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed top-0 right-0 h-screen bg-white border-l border-gray-200 z-[59] transition-transform duration-300 ease-in-out shadow-xl flex flex-col ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ width: '20vw', minWidth: 320, maxWidth: 560 }}
+        onTransitionEnd={() => {
+          // update CSS var for app content shift
+          const offset = open ? Math.min(Math.max(window.innerWidth * 0.2, 320), 560) : 0;
+          document.documentElement.style.setProperty('--assistant-offset', `${offset}px`);
+        }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
