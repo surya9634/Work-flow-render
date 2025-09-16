@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const multer = require('multer');
 
 const PORT = process.env.PORT || 10000;
 
@@ -96,6 +97,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Upload storage (temp files on disk)
+const uploadDir = path.join(__dirname, 'uploads');
+ensureDir(uploadDir);
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, Date.now() + '_' + safe);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 15 * 1024 * 1024 } }); // 15MB
 
 // Initialize local stores on boot
 try { loadMessengerStore(); } catch (_) {}
@@ -195,6 +208,19 @@ app.post('/api/onboarding', requireAuth, (req, res) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     authStore.onboardingByUser.set(userId, data);
     user.onboardingCompleted = true;
+    // Persist business profile from onboarding
+    try {
+      const existing = readBusinessProfile();
+      const updated = {
+        ...existing,
+        business: {
+          name: data.businessName || existing.business?.name || '',
+          about: data.businessDescription || existing.business?.about || '',
+          tone: existing.business?.tone || 'Friendly, helpful, concise'
+        }
+      };
+      writeJsonSafe(businessProfileFile, updated);
+    } catch (_) { /* ignore */ }
     return res.json({ success: true, message: 'Onboarding saved' });
   } catch (e) {
     console.error('Onboarding error:', e);
@@ -685,6 +711,135 @@ const messengerStore = {
 // Track last customer message time per conversation for response time measurement (not persisted)
 const lastCustomerAtByConversation = new Map();
 
+// --- Mother AI Router: state and helpers ---
+const routerStateByConversation = new Map(); // convId -> { stage: 'routing'|'confirm'|'assigned', candidateCampaignId?: string, confidence?: number }
+const businessProfileFile = path.join(dataDir, 'businessProfile.json');
+
+function readBusinessProfile() {
+  return readJsonSafeEnsure(businessProfileFile, {
+    business: { name: '', about: '', tone: 'Friendly, helpful, concise' },
+    products: [],
+    router: {
+      systemPrompt: 'You are an AI intent router for a multi-product business. Decide which product the user is asking about and return ONLY JSON with fields: productId (string|null), productName (string|null), confidence (0-1), needConfirmation (boolean), reason (string), ask (string|null). No extra text.'
+    }
+  });
+}
+
+async function detectIntentWithMotherAI(userText) {
+  const profile = readBusinessProfile();
+  // Build products from active Mother AI elements if available; fallback to campaigns
+  const activeMAI = getActiveMotherAI();
+  let products = [];
+  if (activeMAI && Array.isArray(activeMAI.elements)) {
+    products = activeMAI.elements
+      .map(el => {
+        const c = campaignsStore.campaigns.get(el.campaignId);
+        if (!c) return null;
+        return {
+          id: c.id,
+          name: c.name || c.id,
+          description: c?.brief?.description || '',
+          keywords: Array.isArray(el.keywords) ? el.keywords : []
+        };
+      })
+      .filter(Boolean);
+  }
+  if (!products.length) {
+    products = Array.from(campaignsStore.campaigns.values()).map(c => ({
+      id: c.id,
+      name: c.name || c.id,
+      description: c?.brief?.description || '',
+      keywords: []
+    }));
+  }
+  const systemPrompt = String((activeMAI?.systemPrompt || profile.router?.systemPrompt) || '').trim() || 'You are an AI intent router for a multi-product business. Decide which product the user is asking about and return ONLY JSON with fields: productId (string|null), productName (string|null), confidence (0-1), needConfirmation (boolean), reason (string), ask (string|null). No extra text.';
+  const payload = {
+    business: profile.business || {},
+    products
+  };
+  const userPrompt = `UserMessage:\n${String(userText || '')}\n\nContext:\n${JSON.stringify(payload).slice(0, 6000)}\n\nReturn ONLY JSON with fields: productId (string|null), productName (string|null), confidence (0-1), needConfirmation (boolean), reason (string), ask (string|null).`;
+  const raw = await generateWithGemini(userPrompt, systemPrompt);
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      productId: parsed.productId || null,
+      productName: parsed.productName || null,
+      confidence: Number(parsed.confidence || 0),
+      needConfirmation: Boolean(parsed.needConfirmation),
+      reason: String(parsed.reason || ''),
+      ask: parsed.ask ? String(parsed.ask) : null,
+    };
+  } catch {
+    return { productId: null, productName: null, confidence: 0, needConfirmation: true, reason: 'parse_failed', ask: 'Can you tell me which product you’re interested in?' };
+  }
+}
+
+function findCampaignByProduct(productIdOrName) {
+  const target = String(productIdOrName || '').toLowerCase();
+  if (!target) return null;
+  for (const c of campaignsStore.campaigns.values()) {
+    if (String(c.productId || '').toLowerCase() === target) return c;
+    const n = String(c.name || '').toLowerCase();
+    const d = String(c?.brief?.description || '').toLowerCase();
+    if (n.includes(target) || d.includes(target)) return c;
+  }
+  return null;
+}
+
+function assignCampaignToConversation(convId, campaign) {
+  if (!campaign) return false;
+  const sp = buildSystemPromptFromCampaign(campaign);
+  messengerStore.systemPrompts.set(convId, sp);
+  aiModeByConversation.set(convId, true);
+  saveMessengerStore();
+  try {
+    routerStateByConversation.set(convId, { stage: 'assigned', candidateCampaignId: campaign.id, confidence: 1 });
+  } catch (_) {}
+  return true;
+}
+
+function isAffirmative(text) {
+  return /\b(yes|y|ya|sure|correct|ok|okay|yeah)\b/i.test(String(text || ''));
+}
+
+async function routeIfNeededAndRespond(convId, incomingText, sendFn) {
+  // If awaiting confirmation
+  const state = routerStateByConversation.get(convId);
+  if (state && state.stage === 'confirm') {
+    if (isAffirmative(incomingText)) {
+      const camp = campaignsStore.campaigns.get(state.candidateCampaignId) || null;
+      if (assignCampaignToConversation(convId, camp)) {
+        await sendFn('Great — connecting you with the right assistant.');
+        return true;
+      }
+    } else {
+      await sendFn('No problem. Which product are you interested in?');
+      return true;
+    }
+  }
+
+  const currentSP = messengerStore.systemPrompts.get(convId) || '';
+  if (currentSP) return false; // already assigned to some campaign AI
+
+  const decision = await detectIntentWithMotherAI(incomingText);
+  const chosen = decision.productId || decision.productName || null;
+  if (!chosen) {
+    await sendFn(decision.ask || 'Which of our products are you interested in?');
+    routerStateByConversation.set(convId, { stage: 'routing', candidateCampaignId: null, confidence: decision.confidence || 0 });
+    return true;
+  }
+  const candidate = findCampaignByProduct(chosen);
+  if (!candidate) {
+    await sendFn('Got it. Could you specify which product this is about?');
+    routerStateByConversation.set(convId, { stage: 'routing', candidateCampaignId: null, confidence: decision.confidence || 0 });
+    return true;
+  }
+  // Always confirm before routing (requested policy)
+  await sendFn(`Just to confirm — are you asking about "${candidate.name}"? Reply "yes" to continue.`);
+  routerStateByConversation.set(convId, { stage: 'confirm', candidateCampaignId: candidate.id, confidence: decision.confidence || 0 });
+  return true;
+}
+
 function loadMessengerStore() {
   const json = readJsonSafeEnsure(messengerFile, { conversations: [], messages: {}, systemPrompts: {}, responseTimes: {}, pendingAutoStart: {} });
   messengerStore.conversations = new Map(json.conversations.map(c => [c.id, c]));
@@ -755,6 +910,28 @@ function saveCampaignsStore() {
 }
 
 loadCampaignsStore();
+
+// --- Mother AI configs store ---
+const motherAIFile = path.join(dataDir, 'motherAI.json');
+const motherAIStore = { items: [], activeMotherAIId: null };
+
+function loadMotherAIStore() {
+  const json = readJsonSafeEnsure(motherAIFile, { items: [], activeMotherAIId: null });
+  motherAIStore.items = Array.isArray(json.items) ? json.items : [];
+  motherAIStore.activeMotherAIId = json.activeMotherAIId || null;
+}
+
+function saveMotherAIStore() {
+  writeJsonSafe(motherAIFile, { items: motherAIStore.items, activeMotherAIId: motherAIStore.activeMotherAIId || null });
+}
+
+function getActiveMotherAI() {
+  const id = motherAIStore.activeMotherAIId;
+  if (!id) return null;
+  return motherAIStore.items.find(i => i.id === id) || null;
+}
+
+loadMotherAIStore();
 
 function makeCampaignNameFromDescription(desc = '') {
   const m = String(desc).match(/for\s+([\w-]+)/i);
@@ -1633,6 +1810,28 @@ app.post('/api/messenger/send-message', async (req, res) => {
     // Auto-reply for local provider when customer sends a message
     if ((senderNorm === 'customer') && groqClient && config.ai.autoReplyWebhook && (aiModeByConversation.get(conversationId) === true)) {
       try {
+        // ROUTER: try routing before normal campaign reply
+        const wasHandled = await routeIfNeededAndRespond(conversationId, String(text || ''), async (msg) => {
+          const aiNow = new Date().toISOString();
+          const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: msg, timestamp: aiNow, isRead: true };
+          arr.push(aiMsg);
+          messengerStore.messages.set(conversationId, arr);
+          if (conv) { conv.lastMessage = msg; conv.timestamp = aiNow; messengerStore.conversations.set(conversationId, conv); }
+          // compute response time if prior customer timestamp exists
+          const lastTs = lastCustomerAtByConversation.get(conversationId);
+          if (typeof lastTs === 'number') {
+            const rt = new Date(aiNow).getTime() - lastTs;
+            const list = messengerStore.responseTimes.get(conversationId) || [];
+            list.push(rt);
+            messengerStore.responseTimes.set(conversationId, list);
+            lastCustomerAtByConversation.delete(conversationId);
+          }
+          saveMessengerStore();
+          io.emit('messenger:message_created', { conversationId, message: aiMsg });
+        });
+        if (wasHandled) {
+          return res.json({ success: true });
+        }
         const stored = messengerStore.systemPrompts.get(conversationId) || '';
         const baseSystem = String(stored || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
         const replyText = await generateWithGemini(String(text || ''), baseSystem);
@@ -2137,25 +2336,22 @@ app.post('/webhook', async (req, res) => {
             // AI auto-reply if enabled (and AI mode ON for this conversation)
             if (text && groqClient && config.ai.autoReplyWebhook && (aiModeByConversation.get(convId) === true)) {
               try {
-                const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
-                const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
-                const reply = await generateWithGemini(String(text || ''), baseSystem);
-                if (reply) {
-                  // Send reply via WhatsApp Cloud API using selected mode
+                // ROUTER: try routing first
+                const wasHandled = await routeIfNeededAndRespond(convId, String(text || ''), async (msg) => {
                   const { token, phoneNumberId, mode: waMode } = getWhatsappCreds();
                   if (!token || !phoneNumberId) throw new Error('whatsapp_not_configured');
                   await axios.post(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
                     messaging_product: 'whatsapp',
                     to: m.from,
                     type: 'text',
-                    text: { body: reply.slice(0, 900) }
+                    text: { body: String(msg).slice(0, 900) }
                   }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-WA-Mode': waMode } });
 
                   const aiNow = new Date().toISOString();
-                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: String(msg), timestamp: aiNow, isRead: true };
                   arr.push(aiMsg);
                   messengerStore.messages.set(convId, arr);
-                  conv.lastMessage = reply;
+                  conv.lastMessage = String(msg);
                   conv.timestamp = aiNow;
                   messengerStore.conversations.set(convId, conv);
                   // compute response time if we have a last customer timestamp
@@ -2169,6 +2365,41 @@ app.post('/webhook', async (req, res) => {
                   }
                   saveMessengerStore();
                   io.emit('messenger:message_created', { conversationId: convId, message: aiMsg });
+                });
+                if (!wasHandled) {
+                  const storedPrompt = messengerStore.systemPrompts.get(convId) || '';
+                  const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+                  const reply = await generateWithGemini(String(text || ''), baseSystem);
+                  if (reply) {
+                    // Send reply via WhatsApp Cloud API using selected mode
+                    const { token, phoneNumberId, mode: waMode } = getWhatsappCreds();
+                    if (!token || !phoneNumberId) throw new Error('whatsapp_not_configured');
+                    await axios.post(`https://graph.facebook.com/v21.0/${phoneNumberId}/messages`, {
+                      messaging_product: 'whatsapp',
+                      to: m.from,
+                      type: 'text',
+                      text: { body: reply.slice(0, 900) }
+                    }, { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-WA-Mode': waMode } });
+
+                    const aiNow = new Date().toISOString();
+                    const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+                    arr.push(aiMsg);
+                    messengerStore.messages.set(convId, arr);
+                    conv.lastMessage = reply;
+                    conv.timestamp = aiNow;
+                    messengerStore.conversations.set(convId, conv);
+                    // compute response time if we have a last customer timestamp
+                    const lastTs = lastCustomerAtByConversation.get(convId);
+                    if (typeof lastTs === 'number') {
+                      const rt = new Date(aiNow).getTime() - lastTs;
+                      const list = messengerStore.responseTimes.get(convId) || [];
+                      list.push(rt);
+                      messengerStore.responseTimes.set(convId, list);
+                      lastCustomerAtByConversation.delete(convId);
+                    }
+                    saveMessengerStore();
+                    io.emit('messenger:message_created', { conversationId: convId, message: aiMsg });
+                  }
                 }
               } catch (waAIerr) {
                 console.warn('WA auto-reply failed:', serializeError(waAIerr));
@@ -2265,24 +2496,21 @@ app.post('/webhook', async (req, res) => {
             // Optional: auto-reply with Groq when message text exists and AI mode is ON for this thread
             if (text && groqClient && config.facebook.pageToken && config.ai.autoReplyWebhook && (aiModeByConversation.get(threadId) === true)) {
               try {
-                const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
-                const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
-                const reply = await generateWithGemini(String(text || ''), baseSystem);
-                if (reply) {
-                  // Send reply via FB API
+                // ROUTER: try routing first
+                const wasHandled = await routeIfNeededAndRespond(threadId, String(text || ''), async (msg) => {
                   await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
                     recipient: { id: senderId },
-                    message: { text: reply.slice(0, 900) },
+                    message: { text: String(msg).slice(0, 900) },
                     messaging_type: 'RESPONSE'
                   }, { params: { access_token: config.facebook.pageToken }, headers: { 'Content-Type': 'application/json' } });
                   const aiNow = new Date().toISOString();
                   // Persist AI reply for FB, compute response time
                   const arr1 = messengerStore.messages.get(threadId) || [];
-                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+                  const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: String(msg), timestamp: aiNow, isRead: true };
                   arr1.push(aiMsg);
                   messengerStore.messages.set(threadId, arr1);
                   const conv1 = messengerStore.conversations.get(threadId) || { id: threadId, name: `FB:${senderId}`, profilePic: '', lastMessage: '', timestamp: aiNow, unreadCount: 0 };
-                  conv1.lastMessage = reply;
+                  conv1.lastMessage = String(msg);
                   conv1.timestamp = aiNow;
                   messengerStore.conversations.set(threadId, conv1);
                   const lastTs = lastCustomerAtByConversation.get(threadId);
@@ -2296,6 +2524,40 @@ app.post('/webhook', async (req, res) => {
                   saveMessengerStore();
                   // Emit to frontend
                   io.emit('messenger:message_created', { conversationId: threadId, message: aiMsg });
+                });
+                if (!wasHandled) {
+                  const storedPrompt = messengerStore.systemPrompts.get(threadId) || '';
+                  const baseSystem = String(storedPrompt || '').trim() || 'You are a helpful business chat assistant. Reply concisely and politely.';
+                  const reply = await generateWithGemini(String(text || ''), baseSystem);
+                  if (reply) {
+                    // Send reply via FB API
+                    await axios.post(`https://graph.facebook.com/v21.0/me/messages`, {
+                      recipient: { id: senderId },
+                      message: { text: reply.slice(0, 900) },
+                      messaging_type: 'RESPONSE'
+                    }, { params: { access_token: config.facebook.pageToken }, headers: { 'Content-Type': 'application/json' } });
+                    const aiNow = new Date().toISOString();
+                    // Persist AI reply for FB, compute response time
+                    const arr1 = messengerStore.messages.get(threadId) || [];
+                    const aiMsg = { id: 'ai_' + Date.now(), sender: 'ai', text: reply, timestamp: aiNow, isRead: true };
+                    arr1.push(aiMsg);
+                    messengerStore.messages.set(threadId, arr1);
+                    const conv1 = messengerStore.conversations.get(threadId) || { id: threadId, name: `FB:${senderId}`, profilePic: '', lastMessage: '', timestamp: aiNow, unreadCount: 0 };
+                    conv1.lastMessage = reply;
+                    conv1.timestamp = aiNow;
+                    messengerStore.conversations.set(threadId, conv1);
+                    const lastTs = lastCustomerAtByConversation.get(threadId);
+                    if (typeof lastTs === 'number') {
+                      const rt = new Date(aiNow).getTime() - lastTs;
+                      const list = messengerStore.responseTimes.get(threadId) || [];
+                      list.push(rt);
+                      messengerStore.responseTimes.set(threadId, list);
+                      lastCustomerAtByConversation.delete(threadId);
+                    }
+                    saveMessengerStore();
+                    // Emit to frontend
+                    io.emit('messenger:message_created', { conversationId: threadId, message: aiMsg });
+                  }
                 }
               } catch (aiErr) {
                 console.warn('AI auto-reply failed:', serializeError(aiErr));
@@ -2478,6 +2740,40 @@ app.use(express.static(clientDir, {
   maxAge: '1h'
 }));
 
+// Mother AI endpoints
+app.get('/api/mother-ai', (_req, res) => {
+  try {
+    return res.json({ items: motherAIStore.items, activeMotherAIId: motherAIStore.activeMotherAIId || null });
+  } catch (e) {
+    return res.status(500).json({ error: 'list_failed' });
+  }
+});
+
+app.post('/api/mother-ai', (req, res) => {
+  try {
+    const item = (req.body && req.body.item) || {};
+    if (!item.id) item.id = 'mai_' + Date.now();
+    const idx = motherAIStore.items.findIndex(i => i.id === item.id);
+    if (idx >= 0) motherAIStore.items[idx] = item; else motherAIStore.items.push(item);
+    saveMotherAIStore();
+    return res.json({ success: true, items: motherAIStore.items, activeMotherAIId: motherAIStore.activeMotherAIId || null, lastId: item.id });
+  } catch (e) {
+    return res.status(500).json({ error: 'save_failed' });
+  }
+});
+
+app.post('/api/mother-ai/activate/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!motherAIStore.items.find(i => i.id === id)) return res.status(404).json({ error: 'not_found' });
+    motherAIStore.activeMotherAIId = id;
+    saveMotherAIStore();
+    return res.json({ success: true, activeMotherAIId: id });
+  } catch (e) {
+    return res.status(500).json({ error: 'activate_failed' });
+  }
+});
+
 // System prompt endpoints
 app.get('/api/messenger/system-prompt', (req, res) => {
   try {
@@ -2530,6 +2826,38 @@ app.post('/api/ai/test', async (req, res) => {
   } catch (err) {
     console.error('AI test error:', serializeError(err));
     return res.status(500).json({ error: 'ai_test_failed' });
+  }
+});
+
+// Upload one or more files for assistant analysis
+app.post('/api/assistant/upload', upload.array('files', 6), async (req, res) => {
+  try {
+    const files = (req.files || []).map(f => ({
+      fieldname: f.fieldname,
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+      path: f.path,
+      filename: f.filename,
+    }));
+    return res.json({ success: true, files });
+  } catch (err) {
+    console.error('Upload error:', serializeError(err));
+    return res.status(500).json({ success: false, error: 'upload_failed' });
+  }
+});
+
+// Analyze pasted text or uploaded notes (client can send text + optional file metadata)
+app.post('/api/assistant/analyze', async (req, res) => {
+  try {
+    if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
+    const { text = '', context = '', systemPrompt = '' } = req.body || {};
+    const prompt = `${context}\n\nAnalyze the following report/data and provide:\n- Key insights\n- Anomalies/outliers\n- Actionable recommendations\n\n---\n${text}`.slice(0, 12000);
+    const reply = await generateWithGemini(prompt, systemPrompt);
+    return res.json({ text: reply });
+  } catch (err) {
+    console.error('Analyze error:', serializeError(err));
+    return res.status(500).json({ error: 'analyze_failed' });
   }
 });
 
