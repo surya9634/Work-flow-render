@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { Plus, Trash2, Save, Power, GitBranch } from 'lucide-react';
+import MotherAIFlowChartCanvas from './MotherAIFlowChartCanvas';
 
 // MotherAIFlowChart: build a Mother AI config that maps flow elements to existing campaigns.
 // - System prompt for the Mother AI
@@ -25,6 +26,7 @@ export default function MotherAIFlowChart() {
   const [activeId, setActiveId] = useState(null);
   const [current, setCurrent] = useState(defaultMotherAI());
   const [statusMsg, setStatusMsg] = useState('');
+  const [viewMode, setViewMode] = useState('canvas'); // 'canvas' | 'form'
 
   // Fetch campaigns for dropdown
   useEffect(() => {
@@ -132,9 +134,19 @@ export default function MotherAIFlowChart() {
       <div className="flex items-center gap-3">
         <GitBranch className="w-6 h-6 text-blue-600" />
         <h1 className="text-2xl font-semibold">Flow-Chart</h1>
-        {activeId && (
-          <span className="ml-auto text-sm text-green-600">Active: {activeId}</span>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setViewMode('canvas')}
+            className={`px-3 py-1.5 rounded-lg text-sm border ${viewMode === 'canvas' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200'}`}
+          >Canvas</button>
+          <button
+            onClick={() => setViewMode('form')}
+            className={`px-3 py-1.5 rounded-lg text-sm border ${viewMode === 'form' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200'}`}
+          >Form</button>
+          {activeId && (
+            <span className="text-sm text-green-600">Active: {activeId}</span>
+          )}
+        </div>
       </div>
 
       {/* Mother AI Header */}
@@ -179,74 +191,84 @@ export default function MotherAIFlowChart() {
         </div>
       </div>
 
-      {/* Elements */}
-      <div className="bg-white rounded-lg shadow p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold">Flow Elements (Knots)</h2>
-          <button onClick={addElement} className="inline-flex items-center gap-2 px-3 py-2 bg-gray-800 text-white rounded hover:bg-black">
-            <Plus className="w-4 h-4" /> Add Element
-          </button>
+      {/* Elements / Canvas */}
+      {viewMode === 'canvas' ? (
+        <div className="bg-white rounded-lg shadow p-4">
+          {loading ? (
+            <div className="text-sm text-gray-500">Loading campaigns...</div>
+          ) : (
+            <MotherAIFlowChartCanvas current={current} setCurrent={setCurrent} campaignOptions={campaignOptions} />
+          )}
         </div>
-
-        {loading ? (
-          <div className="text-sm text-gray-500">Loading campaigns...</div>
-        ) : (
-          <div className="space-y-4">
-            {current.elements.length === 0 && (
-              <div className="text-sm text-gray-500">No elements yet. Click "Add Element" to start mapping campaigns.</div>
-            )}
-            {current.elements.map((el) => (
-              <div key={el.id} className="border rounded p-3">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Campaign</label>
-                    <select
-                      className="mt-1 w-full border rounded px-3 py-2"
-                      value={el.campaignId}
-                      onChange={e => updateElement(el.id, { campaignId: e.target.value })}
-                    >
-                      <option value="">Select campaign</option>
-                      {campaignOptions.map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Label (optional)</label>
-                    <input
-                      className="mt-1 w-full border rounded px-3 py-2"
-                      placeholder="e.g., Product A"
-                      value={el.label || ''}
-                      onChange={e => updateElement(el.id, { label: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
-                    <input
-                      className="mt-1 w-full border rounded px-3 py-2"
-                      placeholder="e.g., starter, basic, A-series"
-                      value={(el.keywords || []).join(', ')}
-                      onChange={e => updateElement(el.id, { keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-between mt-2 text-sm text-gray-500">
-                  <div className="truncate">
-                    {el.campaignId && (
-                      <span>
-                        {campaignOptions.find(c => c.id === el.campaignId)?.description || 'No description'}
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={() => removeElement(el.id)} className="inline-flex items-center gap-1 text-red-600 hover:text-red-700">
-                    <Trash2 className="w-4 h-4" /> Remove
-                  </button>
-                </div>
-              </div>
-            ))}
+      ) : (
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Flow Elements (Knots)</h2>
+            <button onClick={addElement} className="inline-flex items-center gap-2 px-3 py-2 bg-gray-800 text-white rounded hover:bg-black">
+              <Plus className="w-4 h-4" /> Add Element
+            </button>
           </div>
-        )}
-      </div>
+
+          {loading ? (
+            <div className="text-sm text-gray-500">Loading campaigns...</div>
+          ) : (
+            <div className="space-y-4">
+              {current.elements.length === 0 && (
+                <div className="text-sm text-gray-500">No elements yet. Click "Add Element" to start mapping campaigns.</div>
+              )}
+              {current.elements.map((el) => (
+                <div key={el.id} className="border rounded p-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Campaign</label>
+                      <select
+                        className="mt-1 w-full border rounded px-3 py-2"
+                        value={el.campaignId}
+                        onChange={e => updateElement(el.id, { campaignId: e.target.value })}
+                      >
+                        <option value="">Select campaign</option>
+                        {campaignOptions.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Label (optional)</label>
+                      <input
+                        className="mt-1 w-full border rounded px-3 py-2"
+                        placeholder="e.g., Product A"
+                        value={el.label || ''}
+                        onChange={e => updateElement(el.id, { label: e.target.value })}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Keywords (comma-separated)</label>
+                      <input
+                        className="mt-1 w-full border rounded px-3 py-2"
+                        placeholder="e.g., starter, basic, A-series"
+                        value={(el.keywords || []).join(', ')}
+                        onChange={e => updateElement(el.id, { keywords: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-between mt-2 text-sm text-gray-500">
+                    <div className="truncate">
+                      {el.campaignId && (
+                        <span>
+                          {campaignOptions.find(c => c.id === el.campaignId)?.description || 'No description'}
+                        </span>
+                      )}
+                    </div>
+                    <button onClick={() => removeElement(el.id)} className="inline-flex items-center gap-1 text-red-600 hover:text-red-700">
+                      <Trash2 className="w-4 h-4" /> Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
