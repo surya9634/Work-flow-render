@@ -18,36 +18,37 @@ const STEPS = [
   { id: 'files', title: 'Files & Links', component: FilesAndLinks },
 ];
 
-const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
+const CreateCampaignModal = ({ isOpen, onClose, onSave, initialData }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [campaignData, setCampaignData] = useState({
+    name: initialData?.name || '',
     brief: {
-      description: '',
-      channels: [],
+      description: initialData?.brief?.description || '',
+      channels: initialData?.brief?.channels || [],
     },
     persona: {
-      name: '',
-      position: '',
-      tone: '',
-      notes: '',
+      name: initialData?.persona?.name || '',
+      position: initialData?.persona?.position || '',
+      tone: initialData?.persona?.tone || '',
+      notes: initialData?.persona?.notes || '',
     },
     leads: {
-      targetAudience: '',
-      leadSource: '',
+      targetAudience: initialData?.leads?.targetAudience || '',
+      leadSource: initialData?.leads?.leadSource || '',
     },
     message: {
-      initialMessage: '',
-      hasOptOut: true,
-      followUpMessage: '',
+      initialMessage: initialData?.message?.initialMessage || '',
+      hasOptOut: initialData?.message?.hasOptOut ?? true,
+      followUpMessage: initialData?.message?.followUpMessage || '',
     },
     flow: {
-      objective: '',
-      steps: [],
+      objective: initialData?.flow?.objective || '',
+      steps: initialData?.flow?.steps || [],
     },
     files: {
-      links: [],
-      attachments: [],
+      links: initialData?.files?.links || [],
+      attachments: initialData?.files?.attachments || [],
     },
   });
   const [stepValidation, setStepValidation] = useState({});
@@ -61,6 +62,10 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
   }, [isOpen]);
 
   const updateCampaignData = (stepKey, data) => {
+    if (stepKey === 'name') {
+      setCampaignData(prev => ({ ...prev, name: data }));
+      return;
+    }
     setCampaignData(prev => ({
       ...prev,
       [stepKey]: { ...prev[stepKey], ...data }
@@ -112,7 +117,7 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
     if (isValid) {
       setIsSubmitting(true);
       try {
-        // Create campaign in backend
+        // Create campaign in backend (send name + rest)
         const res = await fetch('/api/campaigns', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -121,11 +126,17 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
         const data = await res.json();
         if (!res.ok || !data?.success) throw new Error(data?.message || 'create_failed');
         const campId = data.campaign.id;
+
+        // Update name if backend ignores it during create (idempotent)
+        if (campaignData.name && data?.campaign?.name !== campaignData.name) {
+          try { await fetch(`/api/campaigns/${campId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: campaignData.name }) }); } catch(_) {}
+        }
+
         // Start campaign (creates conversation, sets system prompt, sends initial message)
         const startRes = await fetch(`/api/campaigns/${campId}/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: campaignData?.conversationId || null }) });
         const startData = await startRes.json();
         if (!startRes.ok || !startData?.success) throw new Error(startData?.message || 'start_failed');
-        onSave(data.campaign);
+        onSave({ ...data.campaign, name: campaignData.name || data.campaign.name });
         onClose();
       } catch (e) {
         console.error('Campaign create/start failed:', e);
@@ -179,13 +190,21 @@ const CreateCampaignModal = ({ isOpen, onClose, onSave }) => {
                 </p>
               </div>
             </div>
-            <button
-              onClick={handleClose}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              aria-label="Close modal"
-            >
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+              <input
+                placeholder="Campaign name (e.g., Product A Awareness)"
+                value={campaignData.name}
+                onChange={(e) => updateCampaignData('name', e.target.value)}
+                className="px-3 py-2 border rounded-lg text-sm w-72"
+              />
+              <button
+                onClick={handleClose}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                aria-label="Close modal"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
 
           {/* Progress Bar */}

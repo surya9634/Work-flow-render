@@ -9,7 +9,9 @@ import {
   ReactFlowProvider,
   useNodesState,
   useEdgesState,
-  useReactFlow
+  useReactFlow,
+  Handle,
+  Position
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -21,8 +23,10 @@ const neonGlow = 'ring-1 ring-blue-400/30 hover:ring-purple-400/40 transition-al
 // Mother AI Node UI
 function MotherNode({ data }) {
   return (
-    <div className={`${cardBase} ${neon} ${neonGlow} p-3 text-white w-[220px]`}
+    <div className={`${cardBase} ${neon} ${neonGlow} p-3 text-white w-[240px] relative`}
          style={{ boxShadow: '0 0 30px rgba(88, 101, 242, 0.25)' }}>
+      {/* Incoming handles on left/right (visual only), outgoing at bottom */}
+      <Handle type="source" position={Position.Bottom} id="out" style={{ background: '#4f46e5' }} />
       <div className="text-xs uppercase tracking-wider text-blue-200/90">Mother AI</div>
       <div className="text-lg font-semibold">
         {data?.name || 'Mother AI'}
@@ -37,8 +41,10 @@ function MotherNode({ data }) {
 // Campaign Node UI
 function CampaignNode({ data }) {
   return (
-    <div className={`${cardBase} ${neonGlow} p-3 w-[220px] bg-white/80 border-gray-200`}
+    <div className={`${cardBase} ${neonGlow} p-3 w-[240px] bg-white/90 border-gray-200 relative`}
          style={{ boxShadow: '0 0 26px rgba(147, 51, 234, 0.20)' }}>
+      {/* Incoming handle at top */}
+      <Handle type="target" position={Position.Top} id="in" style={{ background: '#9333ea' }} />
       <div className="text-[11px] uppercase tracking-wider text-gray-500">Campaign</div>
       <div className="text-base font-semibold text-gray-900 truncate">{data?.label || data?.name || 'Campaign'}</div>
       <div className="mt-1 text-xs text-gray-600 truncate">
@@ -163,9 +169,17 @@ export default function MotherAIFlowChartCanvas({ current, setCurrent, campaignO
     } : n));
   }, [current?.name, current?.systemPrompt, setNodes]);
 
+  const isValidConnection = useCallback((conn) => {
+    const source = nodes.find(n => n.id === conn.source);
+    const target = nodes.find(n => n.id === conn.target);
+    return source?.type === 'mother' && target?.type === 'campaign';
+  }, [nodes]);
+
   const onConnect = useCallback((params) => {
+    const ok = isValidConnection(params);
+    if (!ok) return;
     setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#2563eb' }, markerEnd: { type: 'arrowclosed', color: '#2563eb' } }, eds));
-  }, [setEdges]);
+  }, [setEdges, isValidConnection]);
 
   const addCampaignNode = () => {
     const id = `c_${Date.now()}`;
@@ -301,6 +315,7 @@ export default function MotherAIFlowChartCanvas({ current, setCurrent, campaignO
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onSelectionChange={onSelectionChange}
+            isValidConnection={isValidConnection}
             fitView
             nodeTypes={nodeTypes}
             defaultEdgeOptions={{ type: 'smoothstep' }}
