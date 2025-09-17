@@ -737,8 +737,10 @@ async function detectIntentWithMotherAI(userText) {
         if (!c) return null;
         return {
           id: c.id,
-          name: c.name || c.id,
+          // Prefer the canvas element label for routing clarity; fallback to campaign name/id
+          name: (el.label && String(el.label).trim()) || c.name || c.id,
           description: c?.brief?.description || '',
+          // Keywords defined on the canvas element help the router match generic terms like "glasses"
           keywords: Array.isArray(el.keywords) ? el.keywords : []
         };
       })
@@ -777,12 +779,34 @@ async function detectIntentWithMotherAI(userText) {
 function findCampaignByProduct(productIdOrName) {
   const target = String(productIdOrName || '').toLowerCase();
   if (!target) return null;
+
+  // 1) Exact productId match
   for (const c of campaignsStore.campaigns.values()) {
     if (String(c.productId || '').toLowerCase() === target) return c;
+  }
+
+  // 2) Name/description contains
+  for (const c of campaignsStore.campaigns.values()) {
     const n = String(c.name || '').toLowerCase();
     const d = String(c?.brief?.description || '').toLowerCase();
     if (n.includes(target) || d.includes(target)) return c;
   }
+
+  // 3) MotherAI element label/keywords match
+  try {
+    const activeMAI = getActiveMotherAI();
+    if (activeMAI && Array.isArray(activeMAI.elements)) {
+      for (const el of activeMAI.elements) {
+        const label = String(el.label || '').toLowerCase();
+        const kws = Array.isArray(el.keywords) ? el.keywords.map(k => String(k).toLowerCase()) : [];
+        if ((label && (label === target || label.includes(target))) || kws.some(k => k === target || k.includes(target))) {
+          const c = campaignsStore.campaigns.get(el.campaignId);
+          if (c) return c;
+        }
+      }
+    }
+  } catch (_) {}
+
   return null;
 }
 
@@ -2805,91 +2829,4 @@ app.post('/api/messenger/ai-mode', (req, res) => {
   try {
     const { conversationId, enabled } = req.body || {};
     if (!conversationId || typeof enabled !== 'boolean') {
-      return res.status(400).json({ success: false, message: 'conversationId and enabled(boolean) required' });
-    }
-    aiModeByConversation.set(conversationId, enabled);
-    return res.json({ success: true, conversationId, enabled });
-  } catch (err) {
-    console.error('Toggle AI mode error:', serializeError(err));
-    return res.status(500).json({ success: false, message: 'toggle_failed' });
-  }
-});
-
-// Simple AI test endpoint for /ai-chat page
-app.post('/api/ai/test', async (req, res) => {
-  try {
-    const prompt = (req.body && req.body.prompt) || 'Say hello!';
-    const systemPrompt = (req.body && req.body.systemPrompt) || '';
-    if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
-    const text = await generateWithGemini(String(prompt), String(systemPrompt));
-    return res.json({ text });
-  } catch (err) {
-    console.error('AI test error:', serializeError(err));
-    return res.status(500).json({ error: 'ai_test_failed' });
-  }
-});
-
-// Upload one or more files for assistant analysis
-app.post('/api/assistant/upload', upload.array('files', 6), async (req, res) => {
-  try {
-    const files = (req.files || []).map(f => ({
-      fieldname: f.fieldname,
-      originalname: f.originalname,
-      mimetype: f.mimetype,
-      size: f.size,
-      path: f.path,
-      filename: f.filename,
-    }));
-    return res.json({ success: true, files });
-  } catch (err) {
-    console.error('Upload error:', serializeError(err));
-    return res.status(500).json({ success: false, error: 'upload_failed' });
-  }
-});
-
-// Analyze pasted text or uploaded notes (client can send text + optional file metadata)
-app.post('/api/assistant/analyze', async (req, res) => {
-  try {
-    if (!groqClient) return res.status(400).json({ error: 'groq_not_configured' });
-    const { text = '', context = '', systemPrompt = '' } = req.body || {};
-    const prompt = `${context}\n\nAnalyze the following report/data and provide:\n- Key insights\n- Anomalies/outliers\n- Actionable recommendations\n\n---\n${text}`.slice(0, 12000);
-    const reply = await generateWithGemini(prompt, systemPrompt);
-    return res.json({ text: reply });
-  } catch (err) {
-    console.error('Analyze error:', serializeError(err));
-    return res.status(500).json({ error: 'analyze_failed' });
-  }
-});
-
-// Facebook App info endpoint (for UI banner)
-app.get('/api/facebook/app', async (_req, res) => {
-  try {
-    const appId = config.facebook.appId || null;
-    const appSecret = config.facebook.appSecret || null;
-    const callback = config.facebook.callbackUrl || null;
-    let appName = null;
-    if (appId && appSecret) {
-      const appToken = `${appId}|${appSecret}`;
-      try {
-        const resp = await axios.get(`https://graph.facebook.com/v21.0/${encodeURIComponent(appId)}`, {
-          params: { access_token: appToken, fields: 'name' },
-          timeout: 8000
-        });
-        appName = resp?.data?.name || null;
-      } catch (_) { /* ignore */ }
-    }
-    return res.json({ appId, appName, callback });
-  } catch (err) {
-    console.error('App info error:', serializeError(err));
-    return res.status(500).json({ error: 'app_info_failed' });
-  }
-});
-
-// SPA fallback: send index.html for non-API routes
-app.get(/^(?!\/api\/).*/, (_req, res) => {
-  res.sendFile(path.join(clientDir, 'index.html'));
-});
-
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+      return res.status(400
