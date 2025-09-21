@@ -665,6 +665,76 @@ const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
 app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
 app.use(express.static(clientDir, { maxAge: '1h' }));
 
+// Facebook OAuth to fetch Page Access Token (optional convenience)
+app.get('/auth/facebook', (req, res) => {
+  try {
+    const redirect = config.facebook.callbackUrl;
+    if (!config.facebook.appId || !config.facebook.appSecret) {
+      return res.status(400).send('facebook_app_not_configured');
+    }
+    const params = new URLSearchParams({
+      client_id: config.facebook.appId,
+      redirect_uri: redirect,
+      scope: [
+        'pages_messaging',
+        'pages_manage_metadata',
+        'pages_read_engagement',
+        'pages_show_list'
+      ].join(','),
+      response_type: 'code',
+      auth_type: 'rerequest'
+    }).toString();
+    return res.redirect(`https://www.facebook.com/v18.0/dialog/oauth?${params}`);
+  } catch (e) {
+    return res.status(500).send('auth_error');
+  }
+});
+
+app.get('/auth/facebook/callback', async (req, res) => {
+  try {
+    const code = req.query.code;
+    if (!code) return res.status(400).send('missing_code');
+    const redirect = config.facebook.callbackUrl;
+    const tokenResp = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
+      params: {
+        client_id: config.facebook.appId,
+        client_secret: config.facebook.appSecret,
+        redirect_uri: redirect,
+        code
+      }
+    });
+    const userAccessToken = tokenResp.data && tokenResp.data.access_token;
+    if (!userAccessToken) return res.status(400).send('no_user_token');
+
+    // Fetch pages for this user and pick a page
+    const pagesResp = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+      params: { access_token: userAccessToken }
+    });
+    const pages = Array.isArray(pagesResp.data && pagesResp.data.data) ? pagesResp.data.data : [];
+    if (!pages.length) return res.status(400).send('no_pages_found');
+
+    const desiredPageId = process.env.FB_PAGE_ID || config.facebook.pageId || null;
+    let page = null;
+    if (desiredPageId) {
+      page = pages.find(p => String(p.id) === String(desiredPageId)) || null;
+    }
+    if (!page) page = pages[0];
+
+    const pageToken = page && page.access_token;
+    const pageId = page && page.id;
+    if (!pageToken || !pageId) return res.status(400).send('no_page_token');
+
+    // Save in-memory
+    config.facebook.pageToken = pageToken;
+    config.facebook.pageId = pageId;
+
+    return res.send(`Facebook connected. Page ${pageId} token set.`);
+  } catch (e) {
+    const msg = e && e.response && e.response.data ? JSON.stringify(e.response.data) : (e.message || 'error');
+    return res.status(500).send(msg);
+  }
+});
+
 // Facebook Messenger webhook (optional direct page webhooks)
 app.get('/messenger/webhook', (req, res) => {
   try {
