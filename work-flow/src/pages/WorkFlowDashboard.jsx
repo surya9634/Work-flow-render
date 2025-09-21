@@ -27,7 +27,7 @@ import SignOutModal from '../components/SignOutModal';
 import CampaignsDemo from '../components/CreateCampaign/CampaignsDemo';
 import AICounsellor from '../components/DashboardSections/AICounsellor/AICounsellor';
 import ContactUploadPage from '../components/DashboardSections/Contacts/ContactUploadPage';
-import MotherAIFlowChart from '../components/DashboardSections/MotherAIFlowChart/MotherAIFlowChart';
+import GlobalAIControl from '../components/DashboardSections/GlobalAI/GlobalAIControl';
 const WorkFlowDashboard = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSignOutModal, setShowSignOutModal] = useState(false);
@@ -39,7 +39,7 @@ const WorkFlowDashboard = () => {
     { icon: BarChart3, label: 'Analytics', path: 'analytics' },
     { icon: Settings, label: 'AI Fine-Tuning', path: 'ai-fine-tuning' },
     { icon: Target, label: 'Campaigns', path: 'campaigns' },
-    { icon: GitBranch, label: 'Flow-Chart', path: 'flow-chart' },
+    { icon: GitBranch, label: 'Global AI', path: 'global-ai' },
     { icon: Share2, label: 'Integration', path: 'integration' },
     { icon: MessagesSquare, label: 'Chats', path: 'chats' },
     { icon: FileText, label: 'AI Counsellor', path: 'ai-counsellor' },
@@ -172,7 +172,7 @@ const WorkFlowDashboard = () => {
             <Route path="/chats" element={<Chats />} />
             <Route path="/ai-counsellor" element={<AICounsellor />} />
             <Route path="/contacts" element={<ContactUploadPage />} />
-            <Route path="/flow-chart" element={<MotherAIFlowChart />} />
+            <Route path="/global-ai" element={<GlobalAIControl />} />
             <Route path="*" element={<Navigate to="/dashboard/profile" replace />} />
           </Routes>
         </main>

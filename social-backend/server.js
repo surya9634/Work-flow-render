@@ -48,7 +48,7 @@ const config = {
     groqApiKey: process.env.GROQ_API_KEY || '',
     groqModel: process.env.GROQ_MODEL || 'llama3-70b-8192',
     autoReplyWebhook: String(process.env.AI_AUTO_REPLY_WEBHOOK || '').toLowerCase() === 'true',
-    globalAiEnabled: true,
+    globalAiEnabled: false,
     globalAiMode: 'replace', // 'replace' | 'hybrid'
     memoryEnabled: true // per-user/per-conversation memory
   }
@@ -441,6 +441,27 @@ app.get('/api/campaigns', (_req, res) => {
   }
 });
 
+// Upsert a campaign (rename or create)
+app.post('/api/campaigns', (req, res) => {
+  try {
+    const { id, name, description } = req.body || {};
+    const cid = String(id || ('c_' + Date.now()));
+    const existing = campaignsStore2.campaigns.get(cid) || { id: cid, name: cid, brief: { description: '' } };
+    const updated = {
+      ...existing,
+      id: cid,
+      name: typeof name === 'string' && name.trim() ? name.trim() : (existing.name || cid),
+      brief: { description: typeof description === 'string' ? description : (existing.brief && existing.brief.description) || '' }
+    };
+    campaignsStore2.campaigns.set(cid, updated);
+    saveCampaigns();
+    try { refreshGlobalKB(); } catch (_) {}
+    return res.json({ success: true, campaign: updated });
+  } catch (e) {
+    return res.status(500).json({ error: 'campaigns_upsert_failed' });
+  }
+});
+
 // Activate a Mother AI config and refresh Global KB
 app.post('/api/mother-ai/activate/:id', (req, res) => {
   try {
@@ -468,6 +489,42 @@ app.post('/api/global-ai/answer', async (req, res) => {
   } catch (e) {
     const msg = (e && e.message) || 'internal_error';
     return res.status(500).json({ success: false, error: msg });
+  }
+});
+
+// AI config endpoints (toggle Global AI, mode, memory)
+app.get('/api/ai/config', (_req, res) => {
+  try {
+    return res.json({
+      success: true,
+      config: {
+        globalAiEnabled: !!config.ai.globalAiEnabled,
+        globalAiMode: config.ai.globalAiMode || 'replace',
+        memoryEnabled: !!config.ai.memoryEnabled
+      }
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false });
+  }
+});
+
+app.post('/api/ai/config', (req, res) => {
+  try {
+    const { globalAiEnabled, globalAiMode, memoryEnabled } = req.body || {};
+    if (typeof globalAiEnabled === 'boolean') config.ai.globalAiEnabled = globalAiEnabled;
+    if (globalAiMode && (globalAiMode === 'replace' || globalAiMode === 'hybrid')) config.ai.globalAiMode = globalAiMode;
+    if (typeof memoryEnabled === 'boolean') config.ai.memoryEnabled = memoryEnabled;
+    try { refreshGlobalKB(); } catch (_) {}
+    return res.json({
+      success: true,
+      config: {
+        globalAiEnabled: !!config.ai.globalAiEnabled,
+        globalAiMode: config.ai.globalAiMode || 'replace',
+        memoryEnabled: !!config.ai.memoryEnabled
+      }
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false });
   }
 });
 
@@ -607,6 +664,57 @@ app.get('/api/whatsapp/diagnose', async (_req, res) => {
 const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
 app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
 app.use(express.static(clientDir, { maxAge: '1h' }));
+
+// Facebook Messenger webhook (optional direct page webhooks)
+app.get('/messenger/webhook', (req, res) => {
+  try {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    const expected = config.webhook.verifyToken || 'WORKFLOW_VERIFY_TOKEN';
+    if (mode === 'subscribe' && String(token) === String(expected) && challenge) {
+      return res.status(200).send(challenge);
+    }
+    return res.status(403).send('forbidden');
+  } catch (_) {
+    return res.status(500).send('error');
+  }
+});
+
+app.post('/messenger/webhook', async (req, res) => {
+  try {
+    const body = req.body || {};
+    if (body.object !== 'page') {
+      return res.sendStatus(200);
+    }
+    const entries = Array.isArray(body.entry) ? body.entry : [];
+    for (const entry of entries) {
+      const messaging = Array.isArray(entry.messaging) ? entry.messaging : [];
+      for (const event of messaging) {
+        try {
+          const senderId = event.sender && event.sender.id ? String(event.sender.id) : null;
+          const text = event.message && event.message.text ? String(event.message.text) : '';
+          if (!senderId || !text) continue;
+          if (config.ai.globalAiEnabled) {
+            const { reply, sources } = await answerWithGlobalAI(text, senderId);
+            try { appendMemory(senderId, String(event.message && event.message.mid || ''), `FB: ${text.slice(0,48)}`, { channel: 'messenger', sources }); } catch (_) {}
+            if (config.facebook.pageToken) {
+              await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${config.facebook.pageToken}`, {
+                recipient: { id: senderId },
+                message: { text: String(reply).slice(0, 900) }
+              }, { headers: { 'Content-Type': 'application/json' } });
+            }
+          }
+        } catch (e) {
+          // ignore per-message errors
+        }
+      }
+    }
+    return res.sendStatus(200);
+  } catch (e) {
+    return res.sendStatus(200);
+  }
+});
 
 // Mother AI endpoints (kept for compatibility with flow builder data)
 app.get('/api/mother-ai', (_req, res) => {
