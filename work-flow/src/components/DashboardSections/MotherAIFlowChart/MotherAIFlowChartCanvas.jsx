@@ -221,6 +221,13 @@ export default function MotherAIFlowChartCanvas({ current, setCurrent, campaignO
     }));
   };
 
+  // Listen for sync requests from parent (before saving)
+  useEffect(() => {
+    const onSyncRequest = () => syncToParent();
+    window.addEventListener('motherai-sync-request', onSyncRequest);
+    return () => window.removeEventListener('motherai-sync-request', onSyncRequest);
+  }, [nodes, edges]);
+
   // Selection handling to drive the inspector
   const onSelectionChange = useCallback(({ nodes: n }) => {
     setSelected(n && n[0] ? n[0] : null);
@@ -231,7 +238,7 @@ export default function MotherAIFlowChartCanvas({ current, setCurrent, campaignO
     setNodes((nds) => nds.map((n) => (n.id === selected.id ? { ...n, data: { ...n.data, ...patch } } : n)));
   };
 
-  // Keyboard shortcuts: Delete/Backspace to remove selected node (except mother), F to fit
+  // Keyboard shortcuts: Delete/Backspace to remove selected node (except mother), F to fit, Ctrl/Cmd+S to Sync+Save
   function KeyboardShortcuts({ selected, setNodes, setEdges }) {
     const { fitView } = useReactFlow();
 
@@ -249,6 +256,13 @@ export default function MotherAIFlowChartCanvas({ current, setCurrent, campaignO
         } else if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) {
           e.preventDefault();
           fitView({ padding: 0.2 });
+        } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+          e.preventDefault();
+          // Ask parent to Save after syncing form data
+          try {
+            const ev = new CustomEvent('motherai-save-request');
+            window.dispatchEvent(ev);
+          } catch (_) {}
         }
       };
 

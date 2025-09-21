@@ -94,6 +94,9 @@ export default function MotherAIFlowChart() {
   const handleSave = async () => {
     try {
       setStatusMsg('Saving...');
+      // allow canvas to request sync first
+      const elementsEvent = new CustomEvent('motherai-sync-request');
+      window.dispatchEvent(elementsEvent);
       const res = await apiFetch('/api/mother-ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,6 +114,13 @@ export default function MotherAIFlowChart() {
       setTimeout(() => setStatusMsg(''), 2500);
     }
   };
+
+  // Listen for keyboard save from canvas
+  useEffect(() => {
+    const onSaveRequest = () => handleSave();
+    window.addEventListener('motherai-save-request', onSaveRequest);
+    return () => window.removeEventListener('motherai-save-request', onSaveRequest);
+  }, [handleSave]);
 
   const handleActivate = async () => {
     try {
