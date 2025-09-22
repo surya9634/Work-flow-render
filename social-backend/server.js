@@ -472,6 +472,180 @@ app.post('/api/campaigns', (req, res) => {
   }
 });
 
+// Patch a campaign (rename/description)
+app.patch('/api/campaigns/:id', (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const existing = campaignsStore2.campaigns.get(id);
+    if (!existing) return res.status(404).json({ error: 'not_found' });
+    const { name, description } = req.body || {};
+    const updated = {
+      ...existing,
+      name: typeof name === 'string' && name.trim() ? name.trim() : existing.name,
+      brief: { description: typeof description === 'string' ? description : (existing.brief && existing.brief.description) || '' }
+    };
+    campaignsStore2.campaigns.set(id, updated);
+    saveCampaigns();
+    try { refreshGlobalKB(); } catch (_) {}
+    return res.json({ success: true, campaign: updated });
+  } catch (e) {
+    return res.status(500).json({ error: 'campaigns_patch_failed' });
+  }
+});
+
+// Start a campaign (mark active, no conversation creation per requirements)
+app.post('/api/campaigns/:id/start', (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const existing = campaignsStore2.campaigns.get(id);
+    if (!existing) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+    const updated = { ...existing, active: true, startedAt: new Date().toISOString() };
+    campaignsStore2.campaigns.set(id, updated);
+    saveCampaigns();
+    return res.json({ success: true, campaign: updated });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'campaign_start_failed' });
+  }
+});
+
+// --- Messenger chat APIs ---
+// List conversations
+app.get('/api/messenger/conversations', (_req, res) => {
+  try {
+    const arr = Array.from(messengerStore.conversations.values()).map(c => ({
+      id: c.id,
+      name: c.name || c.username || c.id,
+      profilePic: c.profilePic || null,
+      lastMessage: c.lastMessage || '',
+      timestamp: c.timestamp || new Date().toISOString(),
+    }));
+    return res.json(arr);
+  } catch (e) {
+    return res.status(500).json({ error: 'conversations_list_failed' });
+  }
+});
+
+// Create/register a conversation or pending entry
+app.post('/api/messenger/conversations', (req, res) => {
+  try {
+    const { id, name, username, autoStartIfFirstMessage, systemPrompt, initialMessage, profileId } = req.body || {};
+    const convId = String(id || ('conv_' + Date.now()));
+    const existing = messengerStore.conversations.get(convId) || null;
+    const base = existing || { id: convId, messages: [] };
+    const updated = {
+      ...base,
+      name: typeof name === 'string' && name ? name : (base.name || username || convId),
+      username: typeof username === 'string' ? username : (base.username || ''),
+      profilePic: base.profilePic || null,
+      lastMessage: base.lastMessage || '',
+      timestamp: base.timestamp || new Date().toISOString(),
+      aiMode: typeof base.aiMode === 'boolean' ? base.aiMode : false,
+      pending: { autoStartIfFirstMessage: !!autoStartIfFirstMessage, initialMessage: initialMessage || '', profileId: profileId || 'default' }
+    };
+    if (typeof systemPrompt === 'string') messengerStore.systemPrompts.set(convId, systemPrompt);
+    messengerStore.conversations.set(convId, updated);
+    saveMessengerStore();
+    try { io.emit('messenger:conversation_created', updated); } catch (_) {}
+    return res.json({ success: true, conversation: updated });
+  } catch (e) {
+    return res.status(500).json({ error: 'conversation_create_failed' });
+  }
+});
+
+// Get messages for a conversation
+app.get('/api/messenger/messages', (req, res) => {
+  try {
+    const convId = String(req.query.conversationId || '');
+    const conv = messengerStore.conversations.get(convId);
+    if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+    const systemPrompt = messengerStore.systemPrompts.get(convId) || '';
+    return res.json({
+      messages: Array.isArray(conv.messages) ? conv.messages : [],
+      systemPrompt,
+      aiMode: !!conv.aiMode
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'messages_fetch_failed' });
+  }
+});
+
+// Send a message in a conversation
+app.post('/api/messenger/send-message', async (req, res) => {
+  try {
+    const { conversationId, text, sender } = req.body || {};
+    const convId = String(conversationId || '');
+    if (!convId) return res.status(400).json({ error: 'conversationId_required' });
+    if (!text) return res.status(400).json({ error: 'text_required' });
+    const conv = messengerStore.conversations.get(convId) || { id: convId, name: convId, messages: [], aiMode: false };
+    const msg = { id: 'm_' + Date.now(), sender: sender || 'agent', text: String(text), timestamp: new Date().toISOString(), isRead: true };
+    conv.messages = Array.isArray(conv.messages) ? conv.messages : [];
+    conv.messages.push(msg);
+    conv.lastMessage = msg.text;
+    conv.timestamp = msg.timestamp;
+    messengerStore.conversations.set(convId, conv);
+    saveMessengerStore();
+    try { io.emit('messenger:message_created', { conversationId: convId, message: msg }); } catch (_) {}
+
+    // If this is a customer message and Global AI is enabled, optionally auto-reply locally
+    if ((sender || 'agent') === 'customer' && config.ai.globalAiEnabled) {
+      try {
+        const { reply } = await answerWithGlobalAI(String(text), convId);
+        const aiMsg = { id: 'm_' + (Date.now() + 1), sender: 'agent', text: String(reply).slice(0, 900), timestamp: new Date().toISOString(), isRead: true };
+        conv.messages.push(aiMsg);
+        conv.lastMessage = aiMsg.text;
+        conv.timestamp = aiMsg.timestamp;
+        messengerStore.conversations.set(convId, conv);
+        saveMessengerStore();
+        try { io.emit('messenger:message_created', { conversationId: convId, message: aiMsg }); } catch (_) {}
+      } catch (_) {}
+    }
+
+    return res.json({ success: true, message: msg });
+  } catch (e) {
+    return res.status(500).json({ error: 'send_failed' });
+  }
+});
+
+// Toggle AI mode per conversation
+app.post('/api/messenger/ai-mode', (req, res) => {
+  try {
+    const { conversationId, enabled } = req.body || {};
+    const convId = String(conversationId || '');
+    const conv = messengerStore.conversations.get(convId);
+    if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+    conv.aiMode = !!enabled;
+    messengerStore.conversations.set(convId, conv);
+    saveMessengerStore();
+    return res.json({ success: true, aiMode: conv.aiMode });
+  } catch (e) {
+    return res.status(500).json({ error: 'ai_mode_failed' });
+  }
+});
+
+// Explicit AI reply helper
+app.post('/api/messenger/ai-reply', async (req, res) => {
+  try {
+    const { conversationId, lastUserMessage, systemPrompt } = req.body || {};
+    const convId = String(conversationId || '');
+    if (!convId) return res.status(400).json({ error: 'conversationId_required' });
+    const conv = messengerStore.conversations.get(convId);
+    if (!conv) return res.status(404).json({ error: 'conversation_not_found' });
+    if (typeof systemPrompt === 'string') messengerStore.systemPrompts.set(convId, systemPrompt);
+    const { reply } = await answerWithGlobalAI(String(lastUserMessage || ''), convId);
+    const aiMsg = { id: 'm_' + Date.now(), sender: 'agent', text: String(reply).slice(0, 900), timestamp: new Date().toISOString(), isRead: true };
+    conv.messages = Array.isArray(conv.messages) ? conv.messages : [];
+    conv.messages.push(aiMsg);
+    conv.lastMessage = aiMsg.text;
+    conv.timestamp = aiMsg.timestamp;
+    messengerStore.conversations.set(convId, conv);
+    saveMessengerStore();
+    try { io.emit('messenger:message_created', { conversationId: convId, message: aiMsg }); } catch (_) {}
+    return res.json({ success: true, message: aiMsg });
+  } catch (e) {
+    return res.status(500).json({ error: 'ai_reply_failed' });
+  }
+});
+
 // Activate a Mother AI config and refresh Global KB
 app.post('/api/mother-ai/activate/:id', (req, res) => {
   try {
@@ -790,16 +964,21 @@ app.get('/auth/facebook/callback', async (req, res) => {
       writeJsonSafe(integrationsFile, current);
     } catch (_) {}
 
-    // Redirect back to Integration tab with robust fallback (handles SPA/auth edge cases)
-    return res
-      .status(200)
-      .send(`<!DOCTYPE html>
+    // Redirect to Integration dashboard immediately with absolute URL; HTML fallback if redirect fails
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || '';
+    const nextUrl = `${baseUrl}/dashboard/integration?connected=1`;
+    try {
+      return res.redirect(302, nextUrl);
+    } catch (_) {
+      return res
+        .status(200)
+        .send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Facebook Connected</title>
-  <meta http-equiv="refresh" content="0; url=/dashboard/integration?connected=1" />
+  <meta http-equiv="refresh" content="0; url=${nextUrl}" />
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; margin: 0; }
     .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(148,163,184,0.2); padding: 24px 28px; border-radius: 16px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
@@ -817,17 +996,18 @@ app.get('/auth/facebook/callback', async (req, res) => {
         window.localStorage.setItem('user', JSON.stringify(demoUser));
       }
     } catch (e) {}
-    setTimeout(function(){ window.location.replace('/dashboard/integration?connected=1'); }, 80);
+    setTimeout(function(){ window.location.replace('${nextUrl}'); }, 60);
   </script>
 </head>
 <body>
   <div class="card">
     <div class="title">Facebook connected</div>
     <div class="desc">Page token saved. Redirecting you to Integration dashboard…</div>
-    <a class="btn" href="/dashboard/integration?connected=1">Go to Dashboard</a>
+    <a class="btn" href="${nextUrl}">Go to Dashboard</a>
   </div>
 </body>
 </html>`);
+    }
   } catch (e) {
     const msg = e && e.response && e.response.data ? JSON.stringify(e.response.data) : (e.message || 'error');
     return res.status(500).send(msg);
