@@ -90,6 +90,16 @@ const profilePromptsFile = path.join(dataDir, 'profile-prompts.json');
 const userMemoriesFile = path.join(dataDir, 'user-memories.json');
 ensureDir(dataDir);
 
+// Load persisted integrations (Facebook Page token/id) on startup
+try {
+  const integrationsFile = path.join(dataDir, 'integrations.json');
+  const saved = readJsonSafeEnsure(integrationsFile, {});
+  if (saved && saved.facebook) {
+    if (saved.facebook.pageToken) config.facebook.pageToken = saved.facebook.pageToken;
+    if (saved.facebook.pageId) config.facebook.pageId = saved.facebook.pageId;
+  }
+} catch (_) {}
+
 function ensureDir(p) { try { fs.mkdirSync(p, { recursive: true }); } catch (_) {} }
 function readJsonSafeEnsure(file, fallback) { try { if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify(fallback || {}, null, 2)); return JSON.parse(fs.readFileSync(file, 'utf8') || 'null'); } catch (_) { return JSON.parse(JSON.stringify(fallback || null)); } }
 function writeJsonSafe(file, data) { try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); return true; } catch (_) { return false; } }
@@ -665,6 +675,47 @@ const clientDir = path.join(__dirname, '..', 'work-flow', 'dist');
 app.use('/assets', express.static(path.join(clientDir, 'assets'), { maxAge: '1y', immutable: true }));
 app.use(express.static(clientDir, { maxAge: '1h' }));
 
+// Facebook App info for Integration banner
+app.get('/api/facebook/app', (_req, res) => {
+  try {
+    return res.json({
+      appId: config.facebook.appId || null,
+      appName: process.env.FACEBOOK_APP_NAME || 'Facebook App',
+      callback: config.facebook.callbackUrl || null
+    });
+  } catch (e) {
+    return res.status(500).json({});
+  }
+});
+
+// Integrations overall status
+app.get('/api/integrations/status', (_req, res) => {
+  try {
+    const fbConnected = !!(config.facebook.pageToken && config.facebook.pageId);
+    const waMode = config.whatsapp.mode || 'production';
+    const waToken = waMode === 'test' ? (config.whatsapp.testToken || '') : (config.whatsapp.token || '');
+    const waConnected = !!(config.whatsapp.phoneNumberId && waToken);
+
+    return res.json({
+      facebook: {
+        connected: fbConnected,
+        pageId: config.facebook.pageId || null,
+        provider: config.facebook.provider || 'local'
+      },
+      whatsapp: {
+        connected: waConnected,
+        mode: waMode,
+        phoneNumberId: config.whatsapp.phoneNumberId || null
+      },
+      instagram: {
+        connected: false
+      }
+    });
+  } catch (e) {
+    return res.status(500).json({ facebook: { connected: false }, whatsapp: { connected: false }, instagram: { connected: false } });
+  }
+});
+
 // Facebook OAuth to fetch Page Access Token (optional convenience)
 app.get('/auth/facebook', (req, res) => {
   try {
@@ -728,7 +779,19 @@ app.get('/auth/facebook/callback', async (req, res) => {
     config.facebook.pageToken = pageToken;
     config.facebook.pageId = pageId;
 
-    return res.send(`Facebook connected. Page ${pageId} token set.`);
+    // Persist to disk so it survives restarts
+    try {
+      const integrationsFile = path.join(dataDir, 'integrations.json');
+      const current = readJsonSafeEnsure(integrationsFile, { facebook: {} });
+      current.facebook = current.facebook || {};
+      current.facebook.pageId = pageId;
+      current.facebook.pageToken = pageToken;
+      current.facebook.connectedAt = new Date().toISOString();
+      writeJsonSafe(integrationsFile, current);
+    } catch (_) {}
+
+    // Redirect back to Integration tab for a smooth UX
+    return res.redirect('/dashboard/integration');
   } catch (e) {
     const msg = e && e.response && e.response.data ? JSON.stringify(e.response.data) : (e.message || 'error');
     return res.status(500).send(msg);
@@ -805,6 +868,24 @@ app.post('/api/mother-ai', (req, res) => {
     return res.json({ success: true, items: motherAIStore.items, activeMotherAIId: motherAIStore.activeMotherAIId || null, lastId: item.id });
   } catch (e) {
     return res.status(500).json({ error: 'save_failed' });
+  }
+});
+
+// SPA fallback for client-side routing
+app.get('*', (req, res) => {
+  // Do not capture API/auth/webhook routes
+  if (
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/auth') ||
+    req.path.startsWith('/webhook') ||
+    req.path.startsWith('/messenger')
+  ) {
+    return res.status(404).send('Not found');
+  }
+  try {
+    res.sendFile(path.join(clientDir, 'index.html'));
+  } catch (e) {
+    res.status(200).sendFile(path.join(clientDir, 'index.html'));
   }
 });
 
