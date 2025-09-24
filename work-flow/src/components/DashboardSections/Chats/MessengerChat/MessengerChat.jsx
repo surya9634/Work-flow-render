@@ -163,7 +163,11 @@ const MessengerChat = () => {
       // dynamic import to avoid SSR issues
       import('socket.io-client').then(({ io }) => {
         if (ignore) return;
-        socket = io(API_BASE, { transports: ['websocket'] });
+        // Allow websocket with fallback to polling for hosts/proxies that don't support WS upgrade
+        socket = io(API_BASE, { transports: ['websocket', 'polling'], withCredentials: false });
+        socket.on('connect', () => { try { console.debug('[socket.io] connected', socket.id); } catch (_) {} });
+        socket.on('connect_error', (err) => { try { console.warn('[socket.io] connect_error', err?.message); } catch (_) {} });
+        socket.on('error', (err) => { try { console.warn('[socket.io] error', err?.message); } catch (_) {} });
         socket.on('messenger:message_created', (payload) => {
           if (!payload?.conversationId || !payload?.message) return;
           const incoming = payload.message;
@@ -218,6 +222,24 @@ const MessengerChat = () => {
             lastUpdated: conv.timestamp || new Date().toISOString(),
           };
           setContacts(prev => [normalized, ...prev]);
+        });
+        // When backend reports bulk sync, refresh the list automatically
+        socket.on('messenger:conversations_synced', async () => {
+          try {
+            const res = await fetch(`${API_BASE}/api/messenger/conversations`);
+            const data = await res.json();
+            if (!Array.isArray(data)) return;
+            const normalized = data.map(c => ({
+              id: c.id,
+              name: c.name,
+              avatar: c.profilePic || `https://unavatar.io/${encodeURIComponent(c.name)}`,
+              lastMessage: c.lastMessage || '',
+              timestamp: 'now',
+              isOnline: true,
+              lastUpdated: c.timestamp || new Date().toISOString(),
+            }));
+            setContacts(normalized);
+          } catch (_) {}
         });
       });
     } catch (_) {}

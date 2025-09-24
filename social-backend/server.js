@@ -17,6 +17,12 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
+// Socket diagnostics
+io.on('connection', (socket) => {
+  try { console.log('[socket.io] client connected', socket.id); } catch (_) {}
+  socket.on('disconnect', () => { try { console.log('[socket.io] client disconnected', socket.id); } catch (_) {} });
+});
+
 // Config from env
 const config = {
   instagram: {
@@ -1318,7 +1324,19 @@ app.post('/messenger/webhook', async (req, res) => {
           // Upsert local conversation and store incoming message
           if (text) {
             const incoming = { id: String(event.message && event.message.mid || ('m_' + Date.now())), sender: 'customer', text, timestamp: new Date().toISOString(), isRead: false };
-            appendMessage(senderId, incoming);
+            const conv = appendMessage(senderId, incoming);
+            // If profilePic is missing, try to fetch it now for better UI
+            try {
+              if (!conv.profilePic && config.facebook.pageToken) {
+                const pic = await fetchFacebookProfilePic(config.facebook.pageToken, senderId);
+                if (pic) {
+                  conv.profilePic = pic;
+                  messengerStore.conversations.set(senderId, conv);
+                  saveMessengerStore();
+                  try { io.emit('messenger:conversation_created', conv); } catch (_) {}
+                }
+              }
+            } catch (_) {}
             bumpAnalytics('messenger', 'received');
           }
 
