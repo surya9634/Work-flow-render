@@ -200,9 +200,14 @@ const CampaignsList = () => {
                     <h3 className="text-lg font-semibold text-gray-900 mb-1">
                       {campaign?.name || extractCampaignName(campaign?.brief?.description || '')}
                     </h3>
-                    <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(campaign.status)}`}>
-                      {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
-                    </span>
+                    {(() => { 
+                      const status = (campaign?.status || 'draft');
+                      return (
+                        <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(status)}`}>
+                          {status.charAt(0).toUpperCase() + status.slice(1)}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <div className="relative">
                     <button className="p-1 text-gray-400 hover:text-gray-600 transition-colors">
@@ -251,15 +256,16 @@ const CampaignsList = () => {
 
                 {/* Actions */}
                 <div className="flex space-x-2">
+                  {(() => { const status = (campaign?.status || 'draft'); return (
                   <button
                     onClick={() => handleToggleCampaignStatus(campaign.id)}
                     className={`flex-1 flex items-center justify-center space-x-1 px-3 py-2 rounded text-sm font-medium transition-colors ${
-                      campaign.status === 'active'
+                      status === 'active'
                         ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
                         : 'bg-green-100 text-green-800 hover:bg-green-200'
                     }`}
                   >
-                    {campaign.status === 'active' ? (
+                    {status === 'active' ? (
                       <>
                         <Pause className="w-4 h-4" />
                         <span>Pause</span>
@@ -270,7 +276,7 @@ const CampaignsList = () => {
                         <span>Start</span>
                       </>
                     )}
-                  </button>
+                  </button> ); })()}
                   <button
                     onClick={() => handleEditCampaign(campaign)}
                     className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
