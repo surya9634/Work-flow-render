@@ -246,17 +246,32 @@ function retrieveContext(query, k) {
   return { items: top, text: ctx.join('\n') };
 }
 
+// Summarize simple analytics to feed Global AI answers
+function analyticsSummaryText() {
+  try {
+    const a = loadAnalytics();
+    const m = a && a.counters && a.counters.messenger ? a.counters.messenger : { sent: 0, received: 0 };
+    const w = a && a.counters && a.counters.whatsapp ? a.counters.whatsapp : { sent: 0, received: 0 };
+    const t = a && a.counters && a.counters.total ? a.counters.total : { sent: 0, received: 0 };
+    return `Analytics — Total(sent:${t.sent}, received:${t.received}); Messenger(sent:${m.sent}, received:${m.received}); WhatsApp(sent:${w.sent}, received:${w.received}).`;
+  } catch (_) {
+    return '';
+  }
+}
+
 async function answerWithGlobalAI(userText, userId) {
   var ctx = retrieveContext(userText, 3);
   var tone = globalKB.business && globalKB.business.tone ? globalKB.business.tone : 'Friendly, helpful, concise';
   var biz = globalKB.business && globalKB.business.name ? globalKB.business.name : 'our business';
   var recent = getRecentMemories(userId, 5).map(function(m){ return '- ' + m.title; }).join('\n');
+  var analyticsLine = analyticsSummaryText();
   var system = [
     'You are the Global AI for ' + biz + '. Keep answers concise and helpful in the tone: ' + tone + '.',
     'Use ONLY the provided context. If uncertain, ask a brief clarifying question.',
     'Mention the product/campaign names you used.',
     (globalKB.business && globalKB.business.about ? ('Business about: ' + globalKB.business.about) : ''),
     (recent ? ('Recent user memory:\n' + recent) : ''),
+    (analyticsLine ? analyticsLine : ''),
     'Context:\n' + ctx.text
   ].filter(Boolean).join('\n');
   var reply = await generateWithGroq(userText, system);

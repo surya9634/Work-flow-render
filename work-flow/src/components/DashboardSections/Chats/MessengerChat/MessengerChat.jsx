@@ -39,7 +39,11 @@ const MessengerChat = () => {
 
   // State for AI tools panel
   const [showAITools, setShowAITools] = useState(true);
-  const [activeAITool, setActiveAITool] = useState('summary'); // 'summary' or 'quickReplies'
+  const [activeAITool, setActiveAITool] = useState('summary'); // 'summary' | 'quickReplies' | 'ask'
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiAnswer, setAiAnswer] = useState('');
+  const [aiAnswerSources, setAiAnswerSources] = useState([]);
+  const [aiAnswerLoading, setAiAnswerLoading] = useState(false);
 
   // Predefined client messages for simulation
   const clientMessages = [
@@ -628,6 +632,16 @@ const MessengerChat = () => {
                   >
                     Quick Replies
                   </button>
+                  <button
+                    onClick={() => setActiveAITool('ask')}
+                    className={`flex-1 py-2 text-sm font-medium ${
+                      activeAITool === 'ask' 
+                        ? 'text-blue-600 border-b-2 border-blue-500' 
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    Ask AI
+                  </button>
                 </div>
               )}
             </div>
@@ -642,12 +656,64 @@ const MessengerChat = () => {
                     isVisible={true}
                     onToggle={() => {}}
                   />
-                ) : (
+                ) : activeAITool === 'quickReplies' ? (
                   <QuickReplies 
                     onSelectReply={handleQuickReplySelect}
                     isVisible={true}
                     onToggle={() => {}}
                   />
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-sm text-gray-600">
+                      Ask the Global AI about business, products (campaigns), analytics, or any dashboard data.
+                    </div>
+                    <textarea
+                      value={aiQuestion}
+                      onChange={(e) => setAiQuestion(e.target.value)}
+                      className="w-full h-24 p-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="e.g., What are our top products? How many messages were received today?"
+                    />
+                    <div className="flex items-center justify-between">
+                      <button
+                        onClick={async () => {
+                          if (!aiQuestion.trim()) return;
+                          setAiAnswerLoading(true);
+                          setAiAnswer('');
+                          setAiAnswerSources([]);
+                          try {
+                            const res = await fetch(`${API_BASE}/api/global-ai/answer`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ text: aiQuestion, userId: selectedContact?.id || 'dashboard', conversationId: selectedContact?.id || '' })
+                            });
+                            const data = await res.json();
+                            if (res.ok && data?.success) {
+                              setAiAnswer(data.reply || '');
+                              setAiAnswerSources(Array.isArray(data.sources) ? data.sources : []);
+                            } else {
+                              setAiAnswer('Failed to get answer.');
+                            }
+                          } catch (_) {
+                            setAiAnswer('Failed to get answer.');
+                          } finally {
+                            setAiAnswerLoading(false);
+                          }
+                        }}
+                        className="px-3 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                        disabled={aiAnswerLoading}
+                      >
+                        {aiAnswerLoading ? 'Thinking...' : 'Ask'}
+                      </button>
+                      {aiAnswerSources.length > 0 && (
+                        <div className="text-xs text-gray-500">Sources: {aiAnswerSources.join(', ')}</div>
+                      )}
+                    </div>
+                    {aiAnswer && (
+                      <div className="p-2 bg-gray-50 rounded border text-sm whitespace-pre-wrap">
+                        {aiAnswer}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
