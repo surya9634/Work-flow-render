@@ -681,20 +681,26 @@ const MessengerChat = () => {
                           setAiAnswer('');
                           setAiAnswerSources([]);
                           try {
-                            const res = await fetch(`${API_BASE}/api/global-ai/answer`, {
+                            const url = `${API_BASE}/api/global-ai/answer`;
+                            const res = await fetch(url, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ text: aiQuestion, userId: selectedContact?.id || 'dashboard', conversationId: selectedContact?.id || '' })
                             });
+                            const ct = (res.headers && res.headers.get && res.headers.get('content-type')) || '';
+                            if (!ct.includes('application/json')) {
+                              const txt = await res.text();
+                              throw new Error(`Server returned non-JSON from ${url}: ${String(txt).slice(0,160)}`);
+                            }
                             const data = await res.json();
                             if (res.ok && data?.success) {
                               setAiAnswer(data.reply || '');
                               setAiAnswerSources(Array.isArray(data.sources) ? data.sources : []);
                             } else {
-                              setAiAnswer('Failed to get answer.');
+                              setAiAnswer(`Failed to get answer${data?.error ? `: ${data.error}` : ''}.`);
                             }
                           } catch (_) {
-                            setAiAnswer('Failed to get answer.');
+                            setAiAnswer('Failed to get answer. Ensure API URL points to backend.');
                           } finally {
                             setAiAnswerLoading(false);
                           }
