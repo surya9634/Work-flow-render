@@ -902,6 +902,21 @@ app.post('/api/global-ai/answer', async (req, res) => {
   }
 });
 
+// Lightweight AI test endpoint for frontend diagnostics
+app.post('/api/ai/test', async (req, res) => {
+  try {
+    const { text } = req.body || {};
+    if (!text) {
+      // basic connectivity + config ping
+      return res.json({ success: true, pong: true, globalAiEnabled: !!config.ai.globalAiEnabled });
+    }
+    const { reply, sources } = await answerWithGlobalAI(String(text), 'diagnostic');
+    return res.json({ success: true, reply, sources });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: (e && e.message) || 'internal_error' });
+  }
+});
+
 // AI config endpoints (toggle Global AI, mode, memory)
 app.get('/api/ai/config', (_req, res) => {
   try {
