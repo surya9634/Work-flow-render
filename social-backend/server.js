@@ -890,30 +890,64 @@ app.post('/api/mother-ai/activate/:id', (req, res) => {
 // Global AI direct answer endpoint
 app.post('/api/global-ai/answer', async (req, res) => {
   try {
-    const { text, userId, conversationId } = req.body || {};
-    if (!text) return res.status(400).json({ error: 'text_required' });
+    const { userId, conversationId } = req.body || {};
+    // Accept both `text` and legacy `prompt`
+    const incomingText = (req.body && (req.body.text || req.body.prompt)) || '';
+    if (!incomingText) return res.status(400).json({ success: false, error: 'text_required' });
     const uid = String(userId || 'anon');
-    const { reply, sources } = await answerWithGlobalAI(String(text), uid);
-    try { appendMemory(uid, String(conversationId || ''), `Asked: ${String(text).slice(0, 48)}`, { lastText: text, sources }); } catch (_) {}
-    return res.json({ success: true, reply, sources });
+    const { reply, sources } = await answerWithGlobalAI(String(incomingText), uid);
+    try { appendMemory(uid, String(conversationId || ''), `Asked: ${String(incomingText).slice(0, 48)}`, { lastText: incomingText, sources }); } catch (_) {}
+    return res.json({ success: true, reply, text: reply, sources });
   } catch (e) {
     const msg = (e && e.message) || 'internal_error';
     return res.status(500).json({ success: false, error: msg });
   }
 });
 
+// Provide helpful info on accidental GETs to this endpoint
+app.get('/api/global-ai/answer', (_req, res) => {
+  try {
+    return res.status(405).json({
+      success: false,
+      error: 'method_not_allowed',
+      usage: {
+        method: 'POST',
+        path: '/api/global-ai/answer',
+        body: { text: 'your question', userId: 'optional', conversationId: 'optional' }
+      }
+    });
+  } catch (_) {
+    return res.status(405).json({ success: false, error: 'method_not_allowed' });
+  }
+});
+
 // Lightweight AI test endpoint for frontend diagnostics
 app.post('/api/ai/test', async (req, res) => {
   try {
-    const { text } = req.body || {};
+    // Accept both `text` and legacy `prompt`
+    const text = (req.body && (req.body.text || req.body.prompt)) || '';
     if (!text) {
       // basic connectivity + config ping
       return res.json({ success: true, pong: true, globalAiEnabled: !!config.ai.globalAiEnabled });
     }
     const { reply, sources } = await answerWithGlobalAI(String(text), 'diagnostic');
-    return res.json({ success: true, reply, sources });
+    return res.json({ success: true, reply, text: reply, sources });
   } catch (e) {
     return res.status(500).json({ success: false, error: (e && e.message) || 'internal_error' });
+  }
+});
+
+// Provide helpful info on accidental GETs to this endpoint
+app.get('/api/ai/test', (_req, res) => {
+  try {
+    return res.json({
+      success: true,
+      pong: true,
+      globalAiEnabled: !!config.ai.globalAiEnabled,
+      usage: { method: 'POST', path: '/api/ai/test', body: { text: 'your prompt' } }
+    });
+  } catch (_) {
+    return res.status(200).json({ success: true, pong: true });
   }
 });
 
