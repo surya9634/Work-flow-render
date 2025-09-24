@@ -1,7 +1,22 @@
-import React from 'react';
-import { Smartphone, Wifi, Battery, Signal } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Smartphone, Wifi, Battery, Signal, Send, RotateCcw, BarChart3, MessageSquare } from 'lucide-react';
+import { apiFetch } from '../../lib/api';
 
 const ChatPreview = ({ campaignData, currentStep }) => {
+  const [conversation, setConversation] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [conversationId, setConversationId] = useState(`preview-${Date.now()}`);
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [conversation]);
+
   const getPersonaName = () => {
     return campaignData?.persona?.name || 'Team Member';
   };
@@ -17,7 +32,7 @@ const ChatPreview = ({ campaignData, currentStep }) => {
     if (!message) {
       message = `Hey {{name}}, this is ${getPersonaName()} from Team ${getProductName()}! We're excited to help you achieve your ambitions. What's your first choice?`;
     }
-    
+
     // Replace variables with preview values
     message = message.replace(/\{\{name\}\}/g, '[name]');
     message = message.replace(/\{\{sender\}\}/g, getPersonaName());
@@ -25,8 +40,78 @@ const ChatPreview = ({ campaignData, currentStep }) => {
     message = message.replace(/\{\{team\}\}/g, `Team ${getProductName()}`);
     message = message.replace(/\{\{company\}\}/g, '[company]');
     message = message.replace(/\{\{position\}\}/g, '[position]');
-    
+
     return message;
+  };
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
+
+    const userMessage = inputMessage.trim();
+    setInputMessage('');
+    setIsLoading(true);
+
+    // Add user message to conversation
+    const newConversation = [...conversation, {
+      id: Date.now(),
+      type: 'user',
+      text: userMessage,
+      timestamp: new Date()
+    }];
+    setConversation(newConversation);
+
+    try {
+      // Call global AI API
+      const response = await apiFetch('/api/global-ai/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: userMessage,
+          userId: 'preview-user',
+          conversationId: conversationId
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Add AI response to conversation
+        setConversation(prev => [...prev, {
+          id: Date.now() + 1,
+          type: 'ai',
+          text: data.reply || 'Sorry, I couldn\'t generate a response.',
+          timestamp: new Date(),
+          sources: data.sources
+        }]);
+      } else {
+        setConversation(prev => [...prev, {
+          id: Date.now() + 1,
+          type: 'ai',
+          text: 'Error: Could not get AI response.',
+          timestamp: new Date()
+        }]);
+      }
+    } catch (error) {
+      setConversation(prev => [...prev, {
+        id: Date.now() + 1,
+        type: 'ai',
+        text: 'Error: Failed to connect to AI service.',
+        timestamp: new Date()
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resetConversation = () => {
+    setConversation([]);
+    setConversationId(`preview-${Date.now()}`);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   };
 
   const getStepPreview = () => {
@@ -122,8 +207,8 @@ const ChatPreview = ({ campaignData, currentStep }) => {
 
               {/* Chat Content */}
               <div className="flex-1 p-4 space-y-4 overflow-y-auto bg-gray-50">
-                {/* Step-specific preview */}
-                {currentStep >= 3 && (
+                {/* Initial campaign message if no conversation */}
+                {conversation.length === 0 && currentStep >= 3 && (
                   <div className="flex justify-start">
                     <div className="max-w-xs bg-white rounded-lg p-3 shadow-sm">
                       <p className="text-sm text-gray-800 whitespace-pre-wrap">
@@ -134,66 +219,68 @@ const ChatPreview = ({ campaignData, currentStep }) => {
                   </div>
                 )}
 
-                {/* Sample response */}
-                {currentStep >= 3 && (
-                  <div className="flex justify-end">
-                    <div className="max-w-xs bg-green-500 text-white rounded-lg p-3">
-                      <p className="text-sm">
-                        Hey! My main goal this month is to improve my productivity and stay more organized with my tasks.
+                {/* Conversation messages */}
+                {conversation.map((msg) => (
+                  <div key={msg.id} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-xs rounded-lg p-3 shadow-sm ${
+                      msg.type === 'user'
+                        ? 'bg-green-500 text-white'
+                        : 'bg-white text-gray-800'
+                    }`}>
+                      <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                      {msg.sources && msg.sources.length > 0 && (
+                        <p className="text-xs opacity-75 mt-1">
+                          Sources: {msg.sources.join(', ')}
+                        </p>
+                      )}
+                      <p className={`text-xs mt-1 ${
+                        msg.type === 'user' ? 'opacity-75' : 'text-gray-500'
+                      }`}>
+                        {msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                       </p>
-                      <p className="text-xs opacity-75 mt-1">7:33 PM</p>
                     </div>
                   </div>
-                )}
+                ))}
 
-                {/* Flow steps preview */}
-                {currentStep >= 4 && campaignData?.flow?.steps?.length > 0 && (
+                {/* Loading indicator */}
+                {isLoading && (
                   <div className="flex justify-start">
                     <div className="max-w-xs bg-white rounded-lg p-3 shadow-sm">
-                      <p className="text-sm text-gray-800">
-                        That's awesome! {getProductName()} is perfect for that. Here are some tips to get started...
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">7:35 PM</p>
+                      <div className="flex items-center space-x-2">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                          <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                        </div>
+                        <span className="text-xs text-gray-500">AI is typing...</span>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* Links preview */}
-                {currentStep >= 5 && campaignData?.files?.links?.length > 0 && (
-                  <div className="flex justify-start">
-                    <div className="max-w-xs bg-white rounded-lg p-3 shadow-sm border-l-4 border-blue-500">
-                      <p className="text-sm font-medium text-gray-900">
-                        {campaignData.files.links[0].title}
-                      </p>
-                      <p className="text-xs text-blue-600 truncate">
-                        {campaignData.files.links[0].url}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">7:36 PM</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Opt-out message */}
-                {currentStep >= 3 && campaignData?.message?.hasOptOut && (
-                  <div className="flex justify-start">
-                    <div className="max-w-xs bg-gray-100 rounded-lg p-2">
-                      <p className="text-xs text-gray-600 italic">
-                        Reply STOP to opt out of messages
-                      </p>
-                    </div>
-                  </div>
-                )}
+                {/* Scroll anchor */}
+                <div ref={messagesEndRef} />
               </div>
 
               {/* Input Area */}
               <div className="p-3 bg-white border-t border-gray-200">
                 <div className="flex items-center space-x-2">
-                  <div className="flex-1 bg-gray-100 rounded-full px-4 py-2">
-                    <p className="text-sm text-gray-500">Type a message...</p>
-                  </div>
-                  <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
-                    <span className="text-white text-sm">➤</span>
-                  </div>
+                  <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Type a message to test Global AI..."
+                    className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    disabled={isLoading}
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!inputMessage.trim() || isLoading}
+                    className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Send className="w-4 h-4 text-white" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -203,11 +290,53 @@ const ChatPreview = ({ campaignData, currentStep }) => {
 
       {/* Step Info Panel */}
       <div className="p-4 bg-white border-t border-gray-200">
-        <h4 className="font-medium text-gray-900 mb-2">{stepPreview.title}</h4>
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-medium text-gray-900">{stepPreview.title}</h4>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={resetConversation}
+              className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              title="Reset conversation"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Analytics */}
+        {conversation.length > 0 && (
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            <div className="bg-blue-50 rounded-lg p-2 flex items-center space-x-2">
+              <MessageSquare className="w-4 h-4 text-blue-600" />
+              <div>
+                <div className="text-xs text-blue-600 font-medium">Messages</div>
+                <div className="text-sm font-semibold text-blue-800">
+                  {conversation.filter(m => m.type === 'user').length} sent, {conversation.filter(m => m.type === 'ai').length} received
+                </div>
+              </div>
+            </div>
+            <div className="bg-green-50 rounded-lg p-2 flex items-center space-x-2">
+              <BarChart3 className="w-4 h-4 text-green-600" />
+              <div>
+                <div className="text-xs text-green-600 font-medium">Session</div>
+                <div className="text-sm font-semibold text-green-800">
+                  {Math.round((new Date() - new Date(conversationId.split('-')[1])) / 1000 / 60)} min
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-gray-50 rounded-lg p-3">
           <p className="text-sm text-gray-700 whitespace-pre-wrap">
             {stepPreview.content}
           </p>
+        </div>
+
+        {/* Global AI Status */}
+        <div className="mt-3 text-xs text-gray-500 flex items-center space-x-2">
+          <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+          <span>Global AI ready for testing</span>
         </div>
       </div>
     </div>

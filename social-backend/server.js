@@ -130,6 +130,25 @@ function buildGlobalKB() {
       about: String(profile.business && profile.business.about || ''),
       tone: String(profile.business && profile.business.tone || 'Friendly, helpful, concise')
     };
+
+    // Include onboarding data from all users
+    var onboardingData = [];
+    for (const [userId, data] of authStore.onboardingByUser) {
+      if (data && typeof data === 'object') {
+        onboardingData.push({
+          userId: userId,
+          businessName: String(data.businessName || ''),
+          businessAbout: String(data.businessAbout || ''),
+          tone: String(data.tone || ''),
+          industry: String(data.industry || ''),
+          goals: Array.isArray(data.goals) ? data.goals.map(String) : [],
+          challenges: Array.isArray(data.challenges) ? data.challenges.map(String) : [],
+          sources: ['onboarding']
+        });
+      }
+    }
+    kb.onboarding = onboardingData;
+
     var byId = new Map();
     for (const c of campaignsStore.campaigns.values()) {
       byId.set(c.id, {
@@ -176,6 +195,16 @@ function appendMemory(userId, convId, title, data) {
     writeJsonSafe(userMemoriesFile, db);
   } catch (_) {}
 }
+
+// Analytics API: exposes simple message counters
+app.get('/api/analytics', (_req, res) => {
+  try {
+    const data = loadAnalytics();
+    return res.json({ success: true, analytics: data });
+  } catch (e) {
+    return res.status(500).json({ success: false });
+  }
+});
 
 function getRecentMemories(userId, limit) {
   try {
@@ -405,6 +434,63 @@ function saveMessengerStore() {
   writeJsonSafe(messengerStoreFile, json);
 }
 
+// --- Simple analytics (messages sent/received per channel) ---
+const analyticsFile = path.join(dataPath, 'analytics.json');
+function defaultAnalytics() {
+  return {
+    counters: {
+      messenger: { sent: 0, received: 0 },
+      whatsapp: { sent: 0, received: 0 },
+      instagram: { sent: 0, received: 0 },
+      total: { sent: 0, received: 0 }
+    }
+  };
+}
+function loadAnalytics() { return readJsonSafe(analyticsFile) || defaultAnalytics(); }
+function saveAnalytics(a) { writeJsonSafe(analyticsFile, a || defaultAnalytics()); }
+function bumpAnalytics(channel, direction) {
+  try {
+    const a = loadAnalytics();
+    const key = String(channel || 'messenger');
+    a.counters[key] = a.counters[key] || { sent: 0, received: 0 };
+    if (direction === 'sent') { a.counters[key].sent += 1; a.counters.total.sent += 1; }
+    if (direction === 'received') { a.counters[key].received += 1; a.counters.total.received += 1; }
+    saveAnalytics(a);
+  } catch (_) {}
+}
+
+// --- Helpers to upsert conversations/messages locally ---
+function ensureConversation(conversationId, seed) {
+  const convId = String(conversationId);
+  const existing = messengerStore.conversations.get(convId) || null;
+  if (existing) return existing;
+  const base = {
+    id: convId,
+    name: (seed && seed.name) || convId,
+    username: (seed && seed.username) || '',
+    profilePic: (seed && seed.profilePic) || null,
+    lastMessage: '',
+    timestamp: new Date().toISOString(),
+    aiMode: false,
+    pending: { autoStartIfFirstMessage: false, initialMessage: '', profileId: 'default' },
+    messages: []
+  };
+  messengerStore.conversations.set(convId, base);
+  saveMessengerStore();
+  return base;
+}
+function appendMessage(conversationId, message) {
+  const conv = ensureConversation(conversationId);
+  conv.messages = Array.isArray(conv.messages) ? conv.messages : [];
+  conv.messages.push(message);
+  conv.lastMessage = message.text;
+  conv.timestamp = message.timestamp;
+  messengerStore.conversations.set(conversationId, conv);
+  saveMessengerStore();
+  try { io.emit('messenger:message_created', { conversationId, message }); } catch (_) {}
+  return conv;
+}
+
 const campaignsStore2 = { campaigns: new Map() };
 function loadCampaigns() {
   const json = readJsonSafeEnsure(campaignsFile, { campaigns: [] });
@@ -508,6 +594,33 @@ app.post('/api/campaigns/:id/start', (req, res) => {
   }
 });
 
+// Stop a campaign
+app.post('/api/campaigns/:id/stop', (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const existing = campaignsStore2.campaigns.get(id);
+    if (!existing) return res.status(404).json({ success: false, message: 'campaign_not_found' });
+    const updated = { ...existing, active: false, stoppedAt: new Date().toISOString(), status: 'paused' };
+    campaignsStore2.campaigns.set(id, updated);
+    saveCampaigns();
+    return res.json({ success: true, campaign: updated });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'campaign_stop_failed' });
+  }
+});
+
+// Delete a campaign
+app.delete('/api/campaigns/:id', (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    const existed = campaignsStore2.campaigns.delete(id);
+    saveCampaigns();
+    return res.json({ success: true, deleted: existed });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'campaign_delete_failed' });
+  }
+});
+
 // --- Messenger chat APIs ---
 // List conversations
 app.get('/api/messenger/conversations', (_req, res) => {
@@ -522,6 +635,37 @@ app.get('/api/messenger/conversations', (_req, res) => {
     return res.json(arr);
   } catch (e) {
     return res.status(500).json({ error: 'conversations_list_failed' });
+  }
+});
+
+// Sync Messenger conversations from Facebook if configured
+app.post('/api/messenger/sync', async (_req, res) => {
+  try {
+    const { pageToken, pageId } = config.facebook;
+    if (!pageToken || !pageId) return res.status(400).json({ success: false, error: 'facebook_not_configured' });
+    const fbConvs = await fetchFacebookConversations(pageToken, pageId);
+    for (const c of fbConvs) {
+      // Upsert conversation
+      const existing = messengerStore.conversations.get(c.id) || null;
+      const base = existing || { id: c.id, messages: [] };
+      const updated = {
+        ...base,
+        name: c.name || base.name || c.id,
+        username: c.username || base.username || '',
+        profilePic: c.profilePic || base.profilePic || null,
+        lastMessage: c.lastMessage || base.lastMessage || '',
+        timestamp: c.timestamp || base.timestamp || new Date().toISOString(),
+        aiMode: typeof base.aiMode === 'boolean' ? base.aiMode : false,
+        pending: base.pending || { autoStartIfFirstMessage: false, initialMessage: '', profileId: 'default' },
+        messages: Array.isArray(base.messages) && base.messages.length > 0 ? base.messages : (c.messages || [])
+      };
+      messengerStore.conversations.set(c.id, updated);
+    }
+    saveMessengerStore();
+    try { io.emit('messenger:conversations_synced'); } catch (_) {}
+    return res.json({ success: true, count: messengerStore.conversations.size });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: 'sync_failed' });
   }
 });
 
@@ -586,6 +730,20 @@ app.post('/api/messenger/send-message', async (req, res) => {
     saveMessengerStore();
     try { io.emit('messenger:message_created', { conversationId: convId, message: msg }); } catch (_) {}
 
+    // Bridge to Facebook Messenger if configured and sender is agent
+    if ((sender || 'agent') === 'agent' && config.facebook.pageToken) {
+      try {
+        await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${config.facebook.pageToken}`, {
+          recipient: { id: convId }, // convId should be PSID for real FB convs
+          message: { text: String(text).slice(0, 900) }
+        }, { headers: { 'Content-Type': 'application/json' } });
+        bumpAnalytics('messenger', 'sent');
+      } catch (err) {
+        // Log but continue
+        console.warn('FB send failed:', err.response?.data || err.message);
+      }
+    }
+
     // If this is a customer message and Global AI is enabled, optionally auto-reply locally
     if ((sender || 'agent') === 'customer' && config.ai.globalAiEnabled) {
       try {
@@ -643,6 +801,23 @@ app.post('/api/messenger/ai-reply', async (req, res) => {
     return res.json({ success: true, message: aiMsg });
   } catch (e) {
     return res.status(500).json({ error: 'ai_reply_failed' });
+  }
+});
+
+// Save system prompt per conversation
+app.post('/api/messenger/system-prompt', (req, res) => {
+  try {
+    const { conversationId, systemPrompt } = req.body || {};
+    const convId = String(conversationId || '');
+    if (!convId) return res.status(400).json({ success: false, message: 'conversationId_required' });
+    if (typeof systemPrompt !== 'string') return res.status(400).json({ success: false, message: 'systemPrompt_required' });
+    // ensure conversation exists to keep things consistent
+    ensureConversation(convId);
+    messengerStore.systemPrompts.set(convId, systemPrompt);
+    saveMessengerStore();
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'system_prompt_save_failed' });
   }
 });
 
@@ -890,6 +1065,67 @@ app.get('/api/integrations/status', (_req, res) => {
   }
 });
 
+// Helper function to fetch Facebook conversations
+async function fetchFacebookConversations(pageToken, pageId) {
+
+  try {
+    // Fetch conversations from Facebook Graph API
+    const response = await axios.get(`https://graph.facebook.com/v18.0/${pageId}/conversations`, {
+      params: {
+        access_token: pageToken,
+        fields: 'id,participants,messages.limit(10){message,from,to,created_time,id}',
+        limit: 50
+      }
+    });
+
+    const conversations = response.data.data || [];
+    const normalizedConversations = [];
+
+    for (const conv of conversations) {
+
+      if (!conv.participants || !conv.participants.data) continue;
+
+      // Find the customer participant (not the page)
+      const customerParticipant = conv.participants.data.find(p => p.id !== pageId);
+      if (!customerParticipant) continue;
+
+      // Get the latest message
+      const messages = conv.messages && conv.messages.data ? conv.messages.data : [];
+      const lastMessage = messages.length > 0 ? messages[0] : null;
+
+      // Create conversation object
+      // IMPORTANT: use PSID (customerParticipant.id) as our canonical conversation ID.
+      // This ensures outbound send via /me/messages works and inbound webhooks (sender.id) map to same ID.
+      const conversation = {
+        id: customerParticipant.id,
+        threadId: conv.id,
+        name: customerParticipant.name || customerParticipant.id,
+        username: customerParticipant.id,
+        profilePic: null, // Could fetch user profile pic separately
+        messages: messages.reverse().map(msg => ({
+          id: msg.id,
+          sender: msg.from.id === pageId ? 'agent' : 'customer',
+          text: msg.message || '',
+          timestamp: msg.created_time,
+          isRead: true
+        })),
+        lastMessage: lastMessage ? (lastMessage.message || '') : '',
+        timestamp: lastMessage ? lastMessage.created_time : new Date().toISOString(),
+        aiMode: false,
+        pending: { autoStartIfFirstMessage: false, initialMessage: '', profileId: 'default' }
+      };
+
+
+      normalizedConversations.push(conversation);
+    }
+
+    return normalizedConversations;
+  } catch (error) {
+    console.error('Error fetching Facebook conversations:', error.response?.data || error.message);
+    return [];
+  }
+}
+
 // Facebook OAuth to fetch Page Access Token (optional convenience)
 app.get('/auth/facebook', (req, res) => {
   try {
@@ -1043,8 +1279,17 @@ app.post('/messenger/webhook', async (req, res) => {
         try {
           const senderId = event.sender && event.sender.id ? String(event.sender.id) : null;
           const text = event.message && event.message.text ? String(event.message.text) : '';
-          if (!senderId || !text) continue;
-          if (config.ai.globalAiEnabled) {
+          if (!senderId) continue;
+
+          // Upsert local conversation and store incoming message
+          if (text) {
+            const incoming = { id: String(event.message && event.message.mid || ('m_' + Date.now())), sender: 'customer', text, timestamp: new Date().toISOString(), isRead: false };
+            appendMessage(senderId, incoming);
+            bumpAnalytics('messenger', 'received');
+          }
+
+          // If Global AI enabled, auto-reply on Messenger
+          if (text && config.ai.globalAiEnabled) {
             const { reply, sources } = await answerWithGlobalAI(text, senderId);
             try { appendMemory(senderId, String(event.message && event.message.mid || ''), `FB: ${text.slice(0,48)}`, { channel: 'messenger', sources }); } catch (_) {}
             if (config.facebook.pageToken) {
@@ -1052,6 +1297,9 @@ app.post('/messenger/webhook', async (req, res) => {
                 recipient: { id: senderId },
                 message: { text: String(reply).slice(0, 900) }
               }, { headers: { 'Content-Type': 'application/json' } });
+              const outgoing = { id: 'm_' + (Date.now() + 1), sender: 'agent', text: String(reply).slice(0, 900), timestamp: new Date().toISOString(), isRead: true };
+              appendMessage(senderId, outgoing);
+              bumpAnalytics('messenger', 'sent');
             }
           }
         } catch (e) {

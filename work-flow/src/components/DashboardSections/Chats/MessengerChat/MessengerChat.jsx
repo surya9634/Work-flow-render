@@ -75,6 +75,19 @@ const MessengerChat = () => {
     async function loadConversations() {
       try {
         setLoading(true);
+
+        // Check if Facebook is connected and sync if needed
+        try {
+          const statusRes = await fetch(`${API_BASE}/api/integrations/status`);
+          const statusData = await statusRes.json();
+          if (statusRes.ok && statusData.facebook?.connected) {
+            // Sync Messenger conversations from Facebook
+            await fetch(`${API_BASE}/api/messenger/sync`, { method: 'POST' });
+          }
+        } catch (syncErr) {
+          console.warn('FB sync failed:', syncErr);
+        }
+
         const res = await fetch(`${API_BASE}/api/messenger/conversations`);
         const data = await res.json();
         if (!res.ok) throw new Error(data?.error || 'Failed to load conversations');
