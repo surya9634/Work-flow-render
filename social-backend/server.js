@@ -32,6 +32,7 @@ const config = {
     pageId: process.env.FB_PAGE_ID || '',
     pageToken: process.env.FB_PAGE_TOKEN || '',
     provider: process.env.MESSENGER_PROVIDER || 'local', // 'local' | 'facebook'
+    messageTag: process.env.FB_MESSAGE_TAG || '' // e.g. 'HUMAN_AGENT' (requires approval) or other approved tag
   },
   whatsapp: {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
@@ -735,12 +736,32 @@ app.post('/api/messenger/send-message', async (req, res) => {
       try {
         await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${config.facebook.pageToken}`, {
           recipient: { id: convId }, // convId should be PSID for real FB convs
+          messaging_type: 'RESPONSE',
           message: { text: String(text).slice(0, 900) }
         }, { headers: { 'Content-Type': 'application/json' } });
         bumpAnalytics('messenger', 'sent');
       } catch (err) {
-        // Log but continue
-        console.warn('FB send failed:', err.response?.data || err.message);
+        const e = err && err.response && err.response.data && err.response.data.error;
+        const code = e && e.code;
+        const subcode = e && e.error_subcode;
+        const canRetryWithTag = Boolean(config.facebook.messageTag);
+        const is24hWindowError = (code === 10 && subcode === 2018278);
+        if (is24hWindowError && canRetryWithTag) {
+          try {
+            await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${config.facebook.pageToken}`, {
+              recipient: { id: convId },
+              messaging_type: 'MESSAGE_TAG',
+              tag: config.facebook.messageTag,
+              message: { text: String(text).slice(0, 900) }
+            }, { headers: { 'Content-Type': 'application/json' } });
+            bumpAnalytics('messenger', 'sent');
+          } catch (err2) {
+            console.warn('FB send (tag) failed:', err2.response?.data || err2.message);
+          }
+        } else {
+          // Log but continue
+          console.warn('FB send failed:', err.response?.data || err.message);
+        }
       }
     }
 
@@ -1065,6 +1086,19 @@ app.get('/api/integrations/status', (_req, res) => {
   }
 });
 
+// Helper: fetch FB user profile picture URL
+async function fetchFacebookProfilePic(pageToken, psid) {
+  try {
+    const resp = await axios.get(`https://graph.facebook.com/v18.0/${psid}/picture`, {
+      params: { redirect: false, type: 'large', access_token: pageToken }
+    });
+    const data = resp && resp.data;
+    return (data && data.data && data.data.url) ? data.data.url : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // Helper function to fetch Facebook conversations
 async function fetchFacebookConversations(pageToken, pageId) {
 
@@ -1101,7 +1135,7 @@ async function fetchFacebookConversations(pageToken, pageId) {
         threadId: conv.id,
         name: customerParticipant.name || customerParticipant.id,
         username: customerParticipant.id,
-        profilePic: null, // Could fetch user profile pic separately
+        profilePic: await fetchFacebookProfilePic(pageToken, customerParticipant.id),
         messages: messages.reverse().map(msg => ({
           id: msg.id,
           sender: msg.from.id === pageId ? 'agent' : 'customer',
