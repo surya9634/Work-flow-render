@@ -157,14 +157,20 @@ function buildGlobalKB() {
     kb.onboarding = onboardingData;
 
     var byId = new Map();
-    for (const c of campaignsStore.campaigns.values()) {
-      byId.set(c.id, {
-        id: c.id,
-        name: String(c.name || c.id),
-        description: String((c.brief && c.brief.description) || ''),
-        keywords: [],
-        sources: ['campaign']
-      });
+    for (const [cid, camp] of campaignsStore2.campaigns) {
+      var base = byId.get(cid) || { id: cid, name: String(camp.name || cid), description: '', keywords: [], sources: ['campaigns'] };
+      var desc = '';
+      try { desc = String((camp.brief && camp.brief.description) || camp.description || ''); } catch (_) {}
+      base.description = [base.description, desc].filter(Boolean).join(' ');
+      var kws = [];
+      try {
+        if (Array.isArray(camp.channels)) kws = kws.concat(camp.channels.map(function(x){ return String(x); }));
+        if (Array.isArray(camp.brief && camp.brief.channels)) kws = kws.concat(camp.brief.channels.map(function(x){ return String(x); }));
+        if (camp.persona && camp.persona.name) kws.push(String(camp.persona.name));
+        if (camp.persona && camp.persona.tone) kws.push(String(camp.persona.tone));
+      } catch (_) {}
+      base.keywords = (base.keywords || []).concat(kws);
+      byId.set(cid, base);
     }
     var mai = getActiveMotherAI();
     if (mai && Array.isArray(mai.elements)) {
@@ -610,6 +616,7 @@ app.post('/api/campaigns/:id/start', (req, res) => {
     const updated = { ...existing, active: true, startedAt: new Date().toISOString() };
     campaignsStore2.campaigns.set(id, updated);
     saveCampaigns();
+    try { refreshGlobalKB(); } catch (_) {}
     return res.json({ success: true, campaign: updated });
   } catch (e) {
     return res.status(500).json({ success: false, message: 'campaign_start_failed' });
@@ -625,6 +632,7 @@ app.post('/api/campaigns/:id/stop', (req, res) => {
     const updated = { ...existing, active: false, stoppedAt: new Date().toISOString(), status: 'paused' };
     campaignsStore2.campaigns.set(id, updated);
     saveCampaigns();
+    try { refreshGlobalKB(); } catch (_) {}
     return res.json({ success: true, campaign: updated });
   } catch (e) {
     return res.status(500).json({ success: false, message: 'campaign_stop_failed' });
@@ -637,6 +645,7 @@ app.delete('/api/campaigns/:id', (req, res) => {
     const id = String(req.params.id || '');
     const existed = campaignsStore2.campaigns.delete(id);
     saveCampaigns();
+    try { refreshGlobalKB(); } catch (_) {}
     return res.json({ success: true, deleted: existed });
   } catch (e) {
     return res.status(500).json({ success: false, message: 'campaign_delete_failed' });
