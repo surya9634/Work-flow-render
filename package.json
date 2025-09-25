@@ -3,6 +3,7 @@
     "node": "20.x"
   },
   "dependencies": {
-    "groq-sdk": "^0.32.0"
+    "groq-sdk": "^0.32.0",
+    "date-fns"
   }
 }
