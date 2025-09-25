@@ -9,6 +9,9 @@ export default function AssistantSidebar() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef(null);
+  // Persistent identity for per-user memory (Leo)
+  const [leoUserId, setLeoUserId] = useState('');
+  const [leoConversationId] = useState('leo_default');
 
   // Small memory of page context
   const pageContext = useMemo(() => {
@@ -22,6 +25,22 @@ export default function AssistantSidebar() {
     else if (path === '/onboarding') tab = 'Onboarding';
     else if (path === '/ai-chat') tab = 'AI Chat';
     return `Page: ${title}\nURL: ${url}\nActiveTab: ${tab}`;
+  }, []);
+
+  // Initialize persistent Leo user id
+  useEffect(() => {
+    try {
+      const key = 'wf_leo_user_id';
+      let uid = localStorage.getItem(key);
+      if (!uid) {
+        uid = 'leo_' + Math.random().toString(36).slice(2, 8) + '_' + Date.now().toString(36);
+        localStorage.setItem(key, uid);
+      }
+      setLeoUserId(uid);
+    } catch (_) {
+      // Fallback if localStorage is unavailable
+      setLeoUserId('leo_' + Date.now().toString(36));
+    }
   }, []);
 
   useEffect(() => {
@@ -92,7 +111,7 @@ Never expose internal tokens or secrets.
 Now greet the user briefly, then ask what they’re trying to achieve this week (in one sentence).`;
       setMessages([
         { id: 'sys1', role: 'system', content: appGuide },
-        { id: 'as1', role: 'assistant', content: "Hi! I'm your Workflow Assistant. How can I support you right now?" },
+        { id: 'as1', role: 'assistant', content: "Hi! I'm Leo, your Workflow Assistant. How can I support you right now?" },
       ]);
     }
   }, [open]);
@@ -116,7 +135,7 @@ Now greet the user briefly, then ask what they’re trying to achieve this week 
       const res = await apiFetch('/api/ai/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: finalPrompt })
+        body: JSON.stringify({ prompt: finalPrompt, userId: leoUserId || 'assistant', conversationId: leoConversationId })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'AI request failed');

@@ -271,15 +271,40 @@ async function answerWithGlobalAI(userText, userId) {
   var biz = globalKB.business && globalKB.business.name ? globalKB.business.name : 'our business';
   var recent = getRecentMemories(userId, 5).map(function(m){ return '- ' + m.title; }).join('\n');
   var analyticsLine = analyticsSummaryText();
+  
+  // Get list of available products from campaigns
+  const availableProducts = [];
+  if (globalKB.items && Array.isArray(globalKB.items)) {
+    globalKB.items.forEach(item => {
+      if (item.name && !availableProducts.includes(item.name)) {
+        availableProducts.push(item.name);
+      }
+    });
+  }
+
   var system = [
-    'You are the Global AI for ' + biz + '. Keep answers concise and helpful in the tone: ' + tone + '.',
-    'Use ONLY the provided context. If uncertain, ask a brief clarifying question.',
-    'Mention the product/campaign names you used.',
-    (globalKB.business && globalKB.business.about ? ('Business about: ' + globalKB.business.about) : ''),
-    (recent ? ('Recent user memory:\n' + recent) : ''),
+    'You are a professional sales agent for ' + biz + '. Your role is to assist customers with product inquiries and provide accurate information.',
+    'IMPORTANT RULES TO FOLLOW:',
+    '1. ONLY discuss products that are explicitly mentioned in the provided context or campaigns.',
+    '2. NEVER make assumptions about product details, specifications, or prices that are not explicitly provided.',
+    '3. If asked about a product not in our catalog, politely explain that it\'s not currently available.',
+    '4. If you don\'t know an answer, say "I don\'t have that information right now. Would you like me to connect you with a human representative?"',
+    '5. Be concise, professional, and maintain a ' + tone + ' tone.',
+    '6. Always direct customers to our official channels for the most accurate and up-to-date information.',
+    '',
+    'Available Products: ' + (availableProducts.length > 0 ? availableProducts.join(', ') : 'No products listed yet'),
+    (globalKB.business && globalKB.business.about ? ('About Us: ' + globalKB.business.about) : ''),
+    (recent ? ('Recent conversation history:\n' + recent) : ''),
     (analyticsLine ? analyticsLine : ''),
-    'Context:\n' + ctx.text
+    'Context:\n' + ctx.text,
+    '',
+    'When responding to product inquiries, use this format:',
+    '1. Confirm the product name',
+    '2. List only the specifications provided in the context',
+    '3. If price is not mentioned, say "For pricing information, please contact our sales team"',
+    '4. End with a call to action (e.g., "Would you like more information about this product?")'
   ].filter(Boolean).join('\n');
+  
   var reply = await generateWithGroq(userText, system);
   return { reply: reply, sources: ctx.items.map(function(i){ return i.id; }) };
 }
@@ -926,11 +951,14 @@ app.post('/api/ai/test', async (req, res) => {
   try {
     // Accept both `text` and legacy `prompt`
     const text = (req.body && (req.body.text || req.body.prompt)) || '';
+    const userId = (req.body && req.body.userId) ? String(req.body.userId) : 'assistant';
+    const conversationId = (req.body && req.body.conversationId) ? String(req.body.conversationId) : '';
     if (!text) {
       // basic connectivity + config ping
       return res.json({ success: true, pong: true, globalAiEnabled: !!config.ai.globalAiEnabled });
     }
-    const { reply, sources } = await answerWithGlobalAI(String(text), 'diagnostic');
+    const { reply, sources } = await answerWithGlobalAI(String(text), userId || 'diagnostic');
+    try { appendMemory(userId, conversationId, `Assistant asked: ${String(text).slice(0, 48)}`, { lastText: text, sources, channel: 'assistant' }); } catch (_) {}
     return res.json({ success: true, reply, text: reply, sources });
   } catch (e) {
     return res.status(500).json({ success: false, error: (e && e.message) || 'internal_error' });
@@ -948,6 +976,19 @@ app.get('/api/ai/test', (_req, res) => {
     });
   } catch (_) {
     return res.status(200).json({ success: true, pong: true });
+  }
+});
+
+// Retrieve recent assistant memories for a user
+app.get('/api/ai/memory', (req, res) => {
+  try {
+    const userId = String(req.query.userId || '');
+    const limit = parseInt(String(req.query.limit || '5'), 10) || 5;
+    if (!userId) return res.status(400).json({ success: false, error: 'userId_required' });
+    const items = getRecentMemories(userId, limit);
+    return res.json({ success: true, items });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: 'memory_fetch_failed' });
   }
 });
 
