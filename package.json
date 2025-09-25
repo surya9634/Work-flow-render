@@ -4,6 +4,6 @@
   },
   "dependencies": {
     "groq-sdk": "^0.32.0",
-    "date-fns"
+    "date-fns": "^3.6.0"
   }
 }
